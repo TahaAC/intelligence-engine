@@ -28,22 +28,30 @@ model Post {
   updatedAt DateTime @updatedAt
 }
 
-// Australian Powerball draws — 7 main numbers (1-35) + 1 Powerball (1-20)
+// Australian lottery draws — supports multiple games
+// (Powerball: 7 main 1-35 + 1 PB 1-20)
+// (Oz Lotto: 7 main 1-47 + 3 supp 1-47)
 model Draw {
-  id           Int      @id @default(autoincrement())
-  drawNumber   Int      @unique
-  date         DateTime
-  dateLabel    String
-  mainNumbers  String   // JSON-serialized array, e.g. "[4, 26, 22, 13, 34, 20, 33]"
-  powerball    Int
-  source       String   @default("seed") // "seed" | "sync"
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  id                   Int      @id @default(autoincrement())
+  game                 String   @default("powerball") // "powerball" | "oz-lotto"
+  drawNumber           Int
+  date                 DateTime
+  dateLabel            String
+  mainNumbers          String   // JSON-serialized array of 7 numbers
+  powerball            Int?     // Powerball only (1-20), null for Oz Lotto
+  supplementaryNumbers String?  // Oz Lotto only (JSON array of 3 numbers, 1-47)
+  source               String   @default("seed") // "seed" | "sync"
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  @@unique([game, drawNumber])
+  @@index([game])
 }
 
 // Sync log — every sync attempt is recorded here for audit
 model SyncLog {
   id           Int      @id @default(autoincrement())
+  game         String   @default("powerball") // which game was synced
   startedAt    DateTime @default(now())
   finishedAt   DateTime?
   source       String

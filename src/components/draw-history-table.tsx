@@ -9,10 +9,19 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { NumberBall } from "@/components/number-ball";
-import type { Draw } from "@/lib/lottery-data";
+import type { UnifiedDraw } from "@/lib/draw-store";
+import type { GameId } from "@/lib/game-config";
+import { GAMES } from "@/lib/game-config";
 import { ScrollArea } from "@/components/ui/scroll-area";
 
-export function DrawHistoryTable({ draws }: { draws: Draw[] }) {
+interface Props {
+  draws: UnifiedDraw[];
+  game: GameId;
+}
+
+export function DrawHistoryTable({ draws, game }: Props) {
+  const config = GAMES[game];
+  const secLabel = config.hasPowerball ? "Powerball" : "Supp";
   const sorted = [...draws].sort((a, b) => b.date.localeCompare(a.date));
   return (
     <div className="rounded-xl border border-slate-800 bg-slate-950/60 overflow-hidden">
@@ -23,24 +32,22 @@ export function DrawHistoryTable({ draws }: { draws: Draw[] }) {
               <TableHead className="w-[80px] text-slate-400 font-mono text-xs">Draw</TableHead>
               <TableHead className="w-[140px] text-slate-400 font-mono text-xs">Date</TableHead>
               <TableHead className="text-slate-400 font-mono text-xs">Main Numbers (7)</TableHead>
-              <TableHead className="w-[80px] text-center text-red-400 font-mono text-xs">Powerball</TableHead>
+              <TableHead className={`text-center font-mono text-xs ${config.hasPowerball ? "text-rose-400" : "text-amber-400"}`}>
+                {secLabel} ({config.hasPowerball ? 1 : config.supplementaryCount})
+              </TableHead>
               <TableHead className="w-[60px] text-right text-slate-400 font-mono text-xs">Sum</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {sorted.map((draw) => {
               const sum = draw.mainNumbers.reduce((s, n) => s + n, 0);
+              const secNumbers = config.hasPowerball
+                ? (draw.powerball != null ? [draw.powerball] : [])
+                : (draw.supplementaryNumbers ?? []);
               return (
-                <TableRow
-                  key={draw.drawNumber}
-                  className="border-slate-800/70 hover:bg-slate-900/60 transition-colors"
-                >
-                  <TableCell className="font-mono text-xs text-cyan-400">
-                    #{draw.drawNumber}
-                  </TableCell>
-                  <TableCell className="font-mono text-xs text-slate-400">
-                    {draw.dateLabel}
-                  </TableCell>
+                <TableRow key={draw.drawNumber} className="border-slate-800/70 hover:bg-slate-900/60 transition-colors">
+                  <TableCell className="font-mono text-xs text-cyan-400">#{draw.drawNumber}</TableCell>
+                  <TableCell className="font-mono text-xs text-slate-400">{draw.dateLabel}</TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1.5 py-1">
                       {draw.mainNumbers.map((n, i) => (
@@ -49,13 +56,13 @@ export function DrawHistoryTable({ draws }: { draws: Draw[] }) {
                     </div>
                   </TableCell>
                   <TableCell className="text-center">
-                    <div className="flex justify-center py-1">
-                      <NumberBall value={draw.powerball} size="sm" variant="powerball" />
+                    <div className="flex justify-center gap-1.5 py-1">
+                      {secNumbers.map((n, i) => (
+                        <NumberBall key={i} value={n} size="sm" variant="powerball" showLeading={!config.hasPowerball} />
+                      ))}
                     </div>
                   </TableCell>
-                  <TableCell className="text-right font-mono text-xs text-slate-300">
-                    {sum}
-                  </TableCell>
+                  <TableCell className="text-right font-mono text-xs text-slate-300">{sum}</TableCell>
                 </TableRow>
               );
             })}

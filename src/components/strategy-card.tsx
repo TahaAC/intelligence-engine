@@ -3,6 +3,8 @@
 import { NumberBall } from "@/components/number-ball";
 import { cn } from "@/lib/utils";
 import type { StrategyResult } from "@/lib/analytics";
+import type { GameId } from "@/lib/game-config";
+import { getGameConfig } from "@/lib/analytics";
 
 const accentMap: Record<string, string> = {
   frequency_weighted: "from-rose-500/20 to-orange-500/10 border-rose-500/40",
@@ -20,7 +22,13 @@ const iconMap: Record<string, string> = {
   statistical_norm: "∑",
 };
 
-export function StrategyCard({ strategy }: { strategy: StrategyResult }) {
+export function StrategyCard({ strategy, game }: { strategy: StrategyResult; game: GameId }) {
+  const config = getGameConfig(game);
+  const secLabel = config.hasPowerball ? "Powerball" : "Supplementary";
+  const secNumbers = config.hasPowerball
+    ? (strategy.powerball != null ? [strategy.powerball] : [])
+    : (strategy.supplementaryNumbers ?? []);
+
   return (
     <div
       className={cn(
@@ -33,21 +41,17 @@ export function StrategyCard({ strategy }: { strategy: StrategyResult }) {
         <div className="flex-1 min-w-0">
           <div className="flex items-baseline gap-2 flex-wrap">
             <h3 className="text-base font-semibold text-white">{strategy.name}</h3>
-            <span className="text-[10px] uppercase tracking-wider text-slate-400 font-mono">
-              {strategy.tagline}
-            </span>
+            <span className="text-[10px] uppercase tracking-wider text-slate-400 font-mono">{strategy.tagline}</span>
           </div>
         </div>
       </div>
-      <p className="text-xs text-slate-300/90 leading-relaxed mb-4 min-h-[3rem]">
-        {strategy.description}
-      </p>
+      <p className="text-xs text-slate-300/90 leading-relaxed mb-4 min-h-[3rem]">{strategy.description}</p>
       <div className="border-t border-slate-700/50 pt-3">
         {/* Main numbers */}
         <div className="mb-3">
           <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1.5">
             <span className="w-1 h-1 rounded-full bg-amber-400" />
-            Main numbers (7) · range 1-35
+            Main numbers (7) · range 1-{config.mainMax}
           </div>
           <div className="flex flex-wrap gap-1.5 justify-center py-1">
             {strategy.mainNumbers.map((n, i) => (
@@ -55,14 +59,16 @@ export function StrategyCard({ strategy }: { strategy: StrategyResult }) {
             ))}
           </div>
         </div>
-        {/* Powerball */}
+        {/* Secondary numbers (Powerball OR supplementary) */}
         <div className="mt-3 pt-3 border-t border-slate-700/50">
-          <div className="text-[10px] font-mono uppercase tracking-wider text-red-400 mb-2 flex items-center gap-1.5">
+          <div className="text-[10px] font-mono uppercase tracking-wider text-rose-400 mb-2 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-            Powerball · range 1-20
+            {secLabel} · {config.hasPowerball ? `1 number · range 1-${config.powerballMax}` : `${config.supplementaryCount} numbers · range 1-${config.supplementaryMax}`}
           </div>
-          <div className="flex justify-center">
-            <NumberBall value={strategy.powerball} size="lg" variant="powerball_pred" />
+          <div className="flex flex-wrap justify-center gap-2">
+            {secNumbers.map((n, i) => (
+              <NumberBall key={i} value={n} size={config.hasPowerball ? "lg" : "md"} variant="powerball_pred" />
+            ))}
           </div>
         </div>
       </div>
