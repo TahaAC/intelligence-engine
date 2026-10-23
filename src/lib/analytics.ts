@@ -15,7 +15,8 @@
 //  10. Five-strategy ensemble predictor producing 7 main + 1 Powerball each
 // =============================================================================
 
-import { LOTTERY_DRAWS, LOTTERY_CONFIG, LATEST_DRAW, type Draw } from "./lottery-data";
+import { LOTTERY_CONFIG, type Draw } from "./lottery-data";
+import { getDraws, getLatestDraw } from "./draw-store";
 
 const {
   mainMax: MAIN_MAX,
@@ -41,14 +42,14 @@ export interface FrequencyRecord {
 export function computeFrequency(): FrequencyRecord[] {
   const counts = new Array<number>(MAIN_MAX + 1).fill(0);
   let totalNumbers = 0;
-  for (const draw of LOTTERY_DRAWS) {
+  for (const draw of getDraws()) {
     for (const n of draw.mainNumbers) {
       counts[n]++;
       totalNumbers++;
     }
   }
 
-  const drawsCount = LOTTERY_DRAWS.length;
+  const drawsCount = getDraws().length;
   const expectedPerNumber = (drawsCount * MAIN_PER_DRAW) / MAIN_MAX;
   const variance = drawsCount * MAIN_PER_DRAW * (1 / MAIN_MAX) * (1 - 1 / MAIN_MAX);
   const stdDev = Math.sqrt(variance);
@@ -67,10 +68,10 @@ export function computeFrequency(): FrequencyRecord[] {
 // -----------------------------------------------------------------------------
 export function computePowerballFrequency(): FrequencyRecord[] {
   const counts = new Array<number>(PB_MAX + 1).fill(0);
-  for (const draw of LOTTERY_DRAWS) {
+  for (const draw of getDraws()) {
     counts[draw.powerball]++;
   }
-  const drawsCount = LOTTERY_DRAWS.length;
+  const drawsCount = getDraws().length;
   const expectedPerNumber = drawsCount / PB_MAX;
   const variance = drawsCount * (1 / PB_MAX) * (1 - 1 / PB_MAX);
   const stdDev = Math.sqrt(variance);
@@ -126,7 +127,7 @@ export interface GapRecord {
 }
 
 export function computeGaps(): GapRecord[] {
-  const chronological = [...LOTTERY_DRAWS].sort((a, b) => a.date.localeCompare(b.date));
+  const chronological = [...getDraws()].sort((a, b) => a.date.localeCompare(b.date));
   const lastSeenIdx = new Array<number | null>(MAIN_MAX + 1).fill(null);
   const gapsByNumber: number[][] = Array.from({ length: MAIN_MAX + 1 }, () => []);
 
@@ -153,7 +154,7 @@ export function computeGaps(): GapRecord[] {
 }
 
 export function computePowerballGaps(): GapRecord[] {
-  const chronological = [...LOTTERY_DRAWS].sort((a, b) => a.date.localeCompare(b.date));
+  const chronological = [...getDraws()].sort((a, b) => a.date.localeCompare(b.date));
   const lastSeenIdx = new Array<number | null>(PB_MAX + 1).fill(null);
   const gapsByNumber: number[][] = Array.from({ length: PB_MAX + 1 }, () => []);
 
@@ -192,7 +193,7 @@ export interface OddEvenResult {
 export function computeOddEven(): OddEvenResult {
   let oddCount = 0;
   let evenCount = 0;
-  const perDraw = LOTTERY_DRAWS.map((d) => {
+  const perDraw = getDraws().map((d) => {
     const odd = d.mainNumbers.filter((n) => n % 2 === 1).length;
     const even = d.mainNumbers.length - odd;
     oddCount += odd;
@@ -221,7 +222,7 @@ export function computeHighLow(): HighLowResult {
   const midPoint = Math.floor(MAIN_MAX / 2);
   let lowCount = 0;
   let highCount = 0;
-  const perDraw = LOTTERY_DRAWS.map((d) => {
+  const perDraw = getDraws().map((d) => {
     const low = d.mainNumbers.filter((n) => n <= midPoint).length;
     const high = d.mainNumbers.length - low;
     lowCount += low;
@@ -252,7 +253,7 @@ export interface SumResult {
 }
 
 export function computeSums(): SumResult {
-  const perDraw = LOTTERY_DRAWS.map((d) => ({
+  const perDraw = getDraws().map((d) => ({
     drawNumber: d.drawNumber,
     sum: d.mainNumbers.reduce((s, n) => s + n, 0),
     dateLabel: d.dateLabel,
@@ -290,7 +291,7 @@ export interface ConsecutiveResult {
 }
 
 export function computeConsecutivePairs(): ConsecutiveResult {
-  const perDraw = LOTTERY_DRAWS.map((d) => {
+  const perDraw = getDraws().map((d) => {
     const sorted = [...d.mainNumbers].sort((a, b) => a - b);
     const pairs: [number, number][] = [];
     for (let i = 0; i < sorted.length - 1; i++) {
@@ -306,7 +307,7 @@ export function computeConsecutivePairs(): ConsecutiveResult {
     perDraw,
     totalPairs,
     drawsWithPair,
-    percentageDrawsWithPair: (drawsWithPair / LOTTERY_DRAWS.length) * 100,
+    percentageDrawsWithPair: (drawsWithPair / getDraws().length) * 100,
   };
 }
 
@@ -323,7 +324,7 @@ export function computeMarkov(): MarkovResult {
   const cooccur = Array.from({ length: MAIN_MAX + 1 }, () => new Array<number>(MAIN_MAX + 1).fill(0));
   const marg = new Array<number>(MAIN_MAX + 1).fill(0);
 
-  for (const draw of LOTTERY_DRAWS) {
+  for (const draw of getDraws()) {
     const nums = draw.mainNumbers;
     for (let i = 0; i < nums.length; i++) {
       marg[nums[i]]++;
@@ -341,7 +342,7 @@ export function computeMarkov(): MarkovResult {
     }
   }
 
-  const seed = LATEST_DRAW.mainNumbers;
+  const seed = getLatestDraw()!.mainNumbers;
   const scores = new Array<number>(MAIN_MAX + 1).fill(0);
   for (const a of seed) {
     for (let b = 1; b <= MAIN_MAX; b++) {
@@ -383,7 +384,7 @@ export interface BayesRecord {
 
 export function computeBayes(): BayesRecord[] {
   const freq = computeFrequency();
-  const T = LOTTERY_DRAWS.length * MAIN_PER_DRAW;
+  const T = getDraws().length * MAIN_PER_DRAW;
   return freq.map((r) => {
     const a = 1 + r.count;
     const b = 1 + (T - r.count);
@@ -403,7 +404,7 @@ export function computeBayes(): BayesRecord[] {
 
 export function computePowerballBayes(): BayesRecord[] {
   const freq = computePowerballFrequency();
-  const T = LOTTERY_DRAWS.length;
+  const T = getDraws().length;
   return freq.map((r) => {
     const a = 1 + r.count;
     const b = 1 + (T - r.count);
@@ -692,18 +693,18 @@ export function computeAggregate(): AggregateStats {
   const gaps = computeGaps();
   const pbFreq = computePowerballFrequency();
   const pbGaps = computePowerballGaps();
-  const sorted = [...LOTTERY_DRAWS].sort((a, b) => a.date.localeCompare(b.date));
+  const sorted = [...getDraws()].sort((a, b) => a.date.localeCompare(b.date));
   const earliest = sorted[0];
   const latest = sorted[sorted.length - 1];
 
   return {
-    totalDraws: LOTTERY_DRAWS.length,
-    totalMainNumbers: LOTTERY_DRAWS.length * MAIN_PER_DRAW,
+    totalDraws: getDraws().length,
+    totalMainNumbers: getDraws().length * MAIN_PER_DRAW,
     latestDrawNumber: latest.drawNumber,
     latestDrawDate: latest.dateLabel,
     earliestDrawNumber: earliest.drawNumber,
     earliestDrawDate: earliest.dateLabel,
-    meanPerDraw: freq.reduce((s, f) => s + f.count, 0) / LOTTERY_DRAWS.length,
+    meanPerDraw: freq.reduce((s, f) => s + f.count, 0) / getDraws().length,
     hotMainNumbers: [...freq].sort((a, b) => b.count - a.count).slice(0, 5).map((f) => f.number),
     coldMainNumbers: [...freq].sort((a, b) => a.count - b.count).slice(0, 5).map((f) => f.number),
     hotPowerball: [...pbFreq].sort((a, b) => b.count - a.count).slice(0, 3).map((f) => f.number),
@@ -720,5 +721,5 @@ export function computeAggregate(): AggregateStats {
 }
 
 // Re-export for convenience
-export { LATEST_DRAW, LOTTERY_DRAWS, LOTTERY_CONFIG };
+export { LOTTERY_CONFIG };
 export type { Draw };

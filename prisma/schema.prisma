@@ -1,9 +1,6 @@
 // This is your Prisma schema file,
 // learn more about it in the docs: https://pris.ly/d/prisma-schema
 
-// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
-// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
-
 generator client {
   provider = "prisma-client-js"
 }
@@ -29,4 +26,29 @@ model Post {
   authorId  String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+// Australian Powerball draws — 7 main numbers (1-35) + 1 Powerball (1-20)
+model Draw {
+  id           Int      @id @default(autoincrement())
+  drawNumber   Int      @unique
+  date         DateTime
+  dateLabel    String
+  mainNumbers  String   // JSON-serialized array, e.g. "[4, 26, 22, 13, 34, 20, 33]"
+  powerball    Int
+  source       String   @default("seed") // "seed" | "sync"
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+}
+
+// Sync log — every sync attempt is recorded here for audit
+model SyncLog {
+  id           Int      @id @default(autoincrement())
+  startedAt    DateTime @default(now())
+  finishedAt   DateTime?
+  source       String
+  drawsFound   Int      @default(0)
+  drawsAdded   Int      @default(0)
+  status       String   @default("running") // "running" | "success" | "error"
+  error        String?
 }

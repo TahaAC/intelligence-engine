@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect, useCallback } from "react";
 import { NumberBall } from "@/components/number-ball";
 import { FrequencyHeatmap } from "@/components/frequency-heatmap";
 import { StrategyCard } from "@/components/strategy-card";
@@ -26,34 +26,44 @@ import {
   computeOddEven,
   computeHighLow,
   computeConsecutivePairs,
-  LATEST_DRAW,
 } from "@/lib/analytics";
-import { LOTTERY_CONFIG, LOTTERY_DRAWS } from "@/lib/lottery-data";
+import { LOTTERY_CONFIG, LOTTERY_DRAWS, type Draw } from "@/lib/lottery-data";
+import { getDraws, setDraws, getLatestDraw } from "@/lib/draw-store";
 
 export default function Home() {
-  const frequency = useMemo(() => computeFrequency(), []);
-  const pbFrequency = useMemo(() => computePowerballFrequency(), []);
-  const hotCold = useMemo(() => computeHotCold(7), []);
-  const pbHotCold = useMemo(() => computePowerballHotCold(5), []);
-  const gaps = useMemo(() => computeGaps(), []);
-  const pbGaps = useMemo(() => computePowerballGaps(), []);
-  const sums = useMemo(() => computeSums(), []);
-  const markov = useMemo(() => computeMarkov(), []);
-  const bayes = useMemo(() => computeBayes(), []);
-  const pbBayes = useMemo(() => computePowerballBayes(), []);
-  const chiSquare = useMemo(() => computeChiSquare(), []);
-  const pbChiSquare = useMemo(() => computePowerballChiSquare(), []);
+  // Version counter — increments whenever the draw store is updated,
+  // forcing all analytics useMemos to recompute.
+  const [drawsVersion, setDrawsVersion] = useState(0);
+  const [syncing, setSyncing] = useState(false);
+  const [syncMsg, setSyncMsg] = useState<string>("");
+  const [lastSync, setLastSync] = useState<string>("");
+
+  const frequency = useMemo(() => computeFrequency(), [drawsVersion]);
+  const pbFrequency = useMemo(() => computePowerballFrequency(), [drawsVersion]);
+  const hotCold = useMemo(() => computeHotCold(7), [drawsVersion]);
+  const pbHotCold = useMemo(() => computePowerballHotCold(5), [drawsVersion]);
+  const gaps = useMemo(() => computeGaps(), [drawsVersion]);
+  const pbGaps = useMemo(() => computePowerballGaps(), [drawsVersion]);
+  const sums = useMemo(() => computeSums(), [drawsVersion]);
+  const markov = useMemo(() => computeMarkov(), [drawsVersion]);
+  const bayes = useMemo(() => computeBayes(), [drawsVersion]);
+  const pbBayes = useMemo(() => computePowerballBayes(), [drawsVersion]);
+  const chiSquare = useMemo(() => computeChiSquare(), [drawsVersion]);
+  const pbChiSquare = useMemo(() => computePowerballChiSquare(), [drawsVersion]);
+  const oddEven = useMemo(() => computeOddEven(), [drawsVersion]);
+  const highLow = useMemo(() => computeHighLow(), [drawsVersion]);
+  const consecutive = useMemo(() => computeConsecutivePairs(), [drawsVersion]);
+  const aggregate = useMemo(() => computeAggregate(), [drawsVersion]);
 
   // Seed for re-randomizing predictions on button click
   const [predictionSeed, setPredictionSeed] = useState<number>(0);
   const [regenCount, setRegenCount] = useState(0);
   const [lastRegen, setLastRegen] = useState<string>("");
 
-  const predictions = useMemo(() => computePredictions(predictionSeed || undefined), [predictionSeed]);
-  const aggregate = useMemo(() => computeAggregate(), []);
-  const oddEven = useMemo(() => computeOddEven(), []);
-  const highLow = useMemo(() => computeHighLow(), []);
-  const consecutive = useMemo(() => computeConsecutivePairs(), []);
+  const predictions = useMemo(
+    () => computePredictions(predictionSeed || undefined),
+    [predictionSeed, drawsVersion]
+  );
 
   const maxCount = Math.max(...frequency.map((f) => f.count));
   const minCount = Math.min(...frequency.map((f) => f.count));
@@ -66,8 +76,75 @@ export default function Home() {
   const sortedPbGaps = [...pbGaps].sort((a, b) => b.dueScore - a.dueScore);
   const pbMaxDue = Math.max(...sortedPbGaps.map((g) => g.dueScore));
 
+  const latestDraw = useMemo(() => getLatestDraw(), [drawsVersion]);
+  const currentDraws = useMemo(() => getDraws(), [drawsVersion]);
+
+  // Fetch draws from /api/draws — pass optional quiet flag to suppress
+  // the "Fetching..." message (used when called as the second half of handleSync).
+  const refreshDraws = useCallback(async (opts?: { quiet?: boolean }) => {
+    if (!opts?.quiet) {
+      setSyncing(true);
+      setSyncMsg("Fetching latest draws from database...");
+    }
+    try {
+      const res = await fetch("/api/draws", { cache: "no-store" });
+      const data = await res.json();
+      if (data.ok && Array.isArray(data.draws) && data.draws.length > 0) {
+        const normalized: Draw[] = data.draws.map((d: any) => ({
+          drawNumber: d.drawNumber,
+          date: d.date,
+          dateLabel: d.dateLabel,
+          mainNumbers: d.mainNumbers,
+          powerball: d.powerball,
+        }));
+        setDraws(normalized);
+        setDrawsVersion((v) => v + 1);
+        if (!opts?.quiet) {
+          setSyncMsg(`Loaded ${normalized.length} draws from database`);
+        }
+      } else if (!opts?.quiet) {
+        setSyncMsg("Database empty — using seeded historical data");
+      }
+    } catch (e) {
+      if (!opts?.quiet) {
+        setSyncMsg("Could not reach /api/draws — using seeded data");
+      }
+    } finally {
+      if (!opts?.quiet) {
+        setSyncing(false);
+        setLastSync(new Date().toLocaleTimeString());
+      }
+    }
+  }, []);
+
+  const handleSync = useCallback(async () => {
+    setSyncing(true);
+    setSyncMsg("Scraping national-lottery.com for new draws...");
+    try {
+      const res = await fetch("/api/sync", { method: "POST", cache: "no-store" });
+      const data = await res.json();
+      if (data.ok) {
+        setSyncMsg(
+          `Sync complete: ${data.drawsAdded} new, ${data.drawsAlreadyInDb} already in DB, ${data.totalInDb} total`
+        );
+        // Refresh draws in store (quietly — don't overwrite the sync-complete message)
+        await refreshDraws({ quiet: true });
+      } else {
+        setSyncMsg(`Sync failed: ${data.error || "unknown error"}`);
+      }
+    } catch (e: any) {
+      setSyncMsg(`Sync error: ${e?.message || String(e)}`);
+    } finally {
+      setSyncing(false);
+      setLastSync(new Date().toLocaleTimeString());
+    }
+  }, [refreshDraws]);
+
+  useEffect(() => {
+    refreshDraws();
+  }, [refreshDraws]);
+
   const handleRegenerate = () => {
-    // Date.now() guarantees a unique seed every click
     setPredictionSeed(Date.now() & 0x7fffffff);
     setRegenCount((c) => c + 1);
     setLastRegen(new Date().toLocaleTimeString());
@@ -128,6 +205,44 @@ export default function Home() {
 
         <main className="max-w-7xl mx-auto px-4 sm:px-6 py-8 space-y-8">
           {/* ============================================================ */}
+          {/* SYNC PANEL */}
+          {/* ============================================================ */}
+          <section className="rounded-xl border border-emerald-500/30 bg-gradient-to-br from-emerald-950/20 to-slate-950/40 p-4 backdrop-blur-sm">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="w-9 h-9 rounded-lg bg-emerald-500/20 border border-emerald-500/40 flex items-center justify-center text-emerald-300 font-mono text-lg shrink-0">
+                  ⟳
+                </div>
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold text-emerald-200 font-mono tracking-wide">
+                    AUTO-SYNC · Source: australia.national-lottery.com
+                  </div>
+                  <div className="text-[11px] font-mono text-slate-400 mt-0.5 truncate">
+                    {syncing ? (
+                      <span className="text-amber-300 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                        {syncMsg}
+                      </span>
+                    ) : syncMsg ? (
+                      <span className="text-slate-300">{syncMsg}{lastSync && ` · ${lastSync}`}</span>
+                    ) : (
+                      <span className="text-slate-500">Idle — click Sync Now to fetch latest draws</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+              <button
+                onClick={handleSync}
+                disabled={syncing}
+                className="px-4 py-2 rounded-lg border border-emerald-500/50 bg-gradient-to-br from-emerald-500/20 to-cyan-500/20 text-emerald-200 font-mono text-xs font-semibold hover:from-emerald-500/30 hover:to-cyan-500/30 hover:text-white transition-all shadow-[0_0_20px_rgba(16,185,129,0.25)] hover:shadow-[0_0_30px_rgba(16,185,129,0.4)] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 shrink-0"
+              >
+                <span className={syncing ? "animate-spin inline-block" : ""}>⟳</span>
+                {syncing ? "Syncing..." : "Sync Now"}
+              </button>
+            </div>
+          </section>
+
+          {/* ============================================================ */}
           {/* HERO */}
           {/* ============================================================ */}
           <section className="relative">
@@ -136,7 +251,7 @@ export default function Home() {
               <div className="relative grid lg:grid-cols-2 gap-8 items-center">
                 <div>
                   <Badge className="mb-4 bg-cyan-500/10 text-cyan-300 border-cyan-500/40 hover:bg-cyan-500/15 font-mono">
-                    DRAW #{LATEST_DRAW.drawNumber} · {LATEST_DRAW.dateLabel}
+                    DRAW #{latestDraw?.drawNumber ?? "—"} · {latestDraw?.dateLabel ?? "—"}
                   </Badge>
                   <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-3 bg-gradient-to-r from-white via-cyan-100 to-cyan-300 bg-clip-text text-transparent">
                     Latest Draw · 7 Main + 1 Powerball
@@ -178,7 +293,7 @@ export default function Home() {
                     Main numbers
                   </div>
                   <div className="flex flex-wrap justify-center gap-2">
-                    {LATEST_DRAW.mainNumbers.map((n, i) => (
+                    {(latestDraw?.mainNumbers ?? []).map((n, i) => (
                       <NumberBall key={i} value={n} size="xl" variant="latest" index={i} />
                     ))}
                   </div>
@@ -186,10 +301,10 @@ export default function Home() {
                     Powerball
                   </div>
                   <div>
-                    <NumberBall value={LATEST_DRAW.powerball} size="xl" variant="powerball" />
+                    <NumberBall value={latestDraw?.powerball ?? 0} size="xl" variant="powerball" />
                   </div>
                   <div className="text-center text-xs font-mono text-slate-400">
-                    Sum: <span className="text-cyan-400">{LATEST_DRAW.mainNumbers.reduce((s, n) => s + n, 0)}</span>
+                    Sum: <span className="text-cyan-400">{(latestDraw?.mainNumbers ?? []).reduce((s, n) => s + n, 0)}</span>
                     {" · "}
                     Expected: <span className="text-slate-300">{Math.round(sums.expectedMean)}</span>
                   </div>
@@ -801,7 +916,7 @@ export default function Home() {
               badge="RAW DATA"
             />
             <div className="mt-5">
-              <DrawHistoryTable draws={LOTTERY_DRAWS} />
+              <DrawHistoryTable draws={currentDraws} />
             </div>
           </section>
 
