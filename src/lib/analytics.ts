@@ -524,7 +524,7 @@ function weightedPick<T extends { score: number; item: number }>(
   return picked.sort((a, b) => a - b);
 }
 
-export function computePredictions(): StrategyResult[] {
+export function computePredictions(seed?: number): StrategyResult[] {
   const freq = computeFrequency();
   const gaps = computeGaps();
   const markov = computeMarkov();
@@ -533,15 +533,20 @@ export function computePredictions(): StrategyResult[] {
   const pbGaps = computePowerballGaps();
 
   const pickCount = MAIN_PER_DRAW;
+  // If a seed is provided (button click), use it (offset per strategy);
+  // otherwise use the original fixed seeds so default predictions stay stable.
+  const baseSeed = seed ?? 0;
+  const resolveSeed = (offset: number, fallback: number) =>
+    baseSeed === 0 ? fallback : baseSeed + offset;
 
   // ---- MAIN predictions ----
   // Strategy 1 — Frequency weighted (hot)
   const hotCandidates = freq.map((f) => ({ item: f.number, score: Math.max(f.count, 1) }));
-  const mainHot = weightedPick(hotCandidates, pickCount, 71401);
+  const mainHot = weightedPick(hotCandidates, pickCount, resolveSeed(101, 71401));
 
   // Strategy 2 — Cold / Due
   const coldCandidates = gaps.map((g) => ({ item: g.number, score: Math.pow(g.dueScore, 2) + 0.5 }));
-  const mainCold = weightedPick(coldCandidates, pickCount, 91337);
+  const mainCold = weightedPick(coldCandidates, pickCount, resolveSeed(202, 91337));
 
   // Strategy 3 — Balanced
   const balancedCandidates = freq.map((f) => {
@@ -551,17 +556,18 @@ export function computePredictions(): StrategyResult[] {
     const score = 1 / (hotRank + 2) + 1 / (coldRank + 2);
     return { item: f.number, score };
   });
-  const mainBalanced = weightedPick(balancedCandidates, pickCount, 424242);
+  const mainBalanced = weightedPick(balancedCandidates, pickCount, resolveSeed(303, 424242));
 
   // Strategy 4 — Markov-informed
   const markovCandidates = markov.candidates.map((c) => ({ item: c.number, score: c.score + 0.1 }));
-  const mainMarkov = weightedPick(markovCandidates, pickCount, 555555);
+  const mainMarkov = weightedPick(markovCandidates, pickCount, resolveSeed(404, 555555));
 
   // Strategy 5 — Statistical norm (Monte-Carlo, sum + balance optimization)
   const expectedSum = (pickCount * (MAIN_MAX + 1)) / 2;
   let bestSet: number[] = [];
   let bestScore = -Infinity;
-  const rng = mulberry32(20261022);
+  const mcSeed = resolveSeed(505, 20261022);
+  const rng = mulberry32(mcSeed);
   for (let trial = 0; trial < 50_000; trial++) {
     const candidate: number[] = [];
     while (candidate.length < pickCount) {
@@ -578,24 +584,34 @@ export function computePredictions(): StrategyResult[] {
     if (score > bestScore) { bestScore = score; bestSet = candidate; }
   }
 
-  // ---- POWERBALL predictions ----
-  // Strategy 1 — most frequent Powerball
-  const pbHot = [...pbFreq].sort((a, b) => b.count - a.count)[0].number;
-  // Strategy 2 — most overdue Powerball
-  const pbCold = [...pbGaps].sort((a, b) => b.dueScore - a.dueScore)[0].number;
-  // Strategy 3 — median-rank Powerball (balancing hot & cold)
-  const pbBalanced = [...pbFreq]
-    .map((f, i) => {
-      const g = pbGaps[i];
-      const hotRank = [...pbFreq].sort((a, b) => b.count - a.count).findIndex(x => x.number === f.number) + 1;
-      const coldRank = [...pbGaps].sort((a, b) => b.dueScore - a.dueScore).findIndex(x => x.number === g.number) + 1;
-      return { item: f.number, score: 1 / (hotRank + 2) + 1 / (coldRank + 2) };
-    })
-    .sort((a, b) => b.score - a.score)[0].item;
-  // Strategy 4 — Markov not really applicable for single PB; use 2nd-most-recent trend
-  const pbMarkov = [...pbFreq].sort((a, b) => b.count - a.count)[1 % PB_MAX].number;
-  // Strategy 5 — expected PB value (mean of uniform 1-20)
-  const pbStatistical = Math.round((PB_MAX + 1) / 2); // 10 or 11; pick 11
+  // ---- POWERBALL predictions (now also seed-aware) ----
+  // Strategy 1 — weighted pick biased toward hot PB
+  const pbHotCands = pbFreq.map((f) => ({ item: f.number, score: Math.max(f.count, 1) }));
+  const pbHot = weightedPick(pbHotCands, 1, resolveSeed(601, 71401))[0];
+
+  // Strategy 2 — weighted pick biased toward overdue PB
+  const pbColdCands = pbGaps.map((g) => ({ item: g.number, score: Math.pow(g.dueScore, 2) + 0.5 }));
+  const pbCold = weightedPick(pbColdCands, 1, resolveSeed(702, 91337))[0];
+
+  // Strategy 3 — weighted pick from rank-fused PB scores
+  const pbBalancedCands = pbFreq.map((f, i) => {
+    const g = pbGaps[i];
+    const hotRank = [...pbFreq].sort((a, b) => b.count - a.count).findIndex(x => x.number === f.number) + 1;
+    const coldRank = [...pbGaps].sort((a, b) => b.dueScore - a.dueScore).findIndex(x => x.number === g.number) + 1;
+    return { item: f.number, score: 1 / (hotRank + 2) + 1 / (coldRank + 2) };
+  });
+  const pbBalanced = weightedPick(pbBalancedCands, 1, resolveSeed(803, 424242))[0];
+
+  // Strategy 4 — Markov PB: weighted by frequency (still gives some variety)
+  const pbMarkovCands = pbFreq.map((f) => ({ item: f.number, score: Math.max(f.count, 0.5) }));
+  const pbMarkov = weightedPick(pbMarkovCands, 1, resolveSeed(904, 555555))[0];
+
+  // Strategy 5 — Statistical Norm PB: weighted around midpoint of 1-20 (i.e. 10-11)
+  const pbStatCands = ALL_PB.map((n) => ({
+    item: n,
+    score: 1 / (1 + Math.abs(n - 10.5)),
+  }));
+  const pbStatistical = weightedPick(pbStatCands, 1, resolveSeed(1005, 20261022))[0];
 
   return [
     {

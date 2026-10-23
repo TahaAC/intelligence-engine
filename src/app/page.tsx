@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { NumberBall } from "@/components/number-ball";
 import { FrequencyHeatmap } from "@/components/frequency-heatmap";
 import { StrategyCard } from "@/components/strategy-card";
@@ -43,7 +43,13 @@ export default function Home() {
   const pbBayes = useMemo(() => computePowerballBayes(), []);
   const chiSquare = useMemo(() => computeChiSquare(), []);
   const pbChiSquare = useMemo(() => computePowerballChiSquare(), []);
-  const predictions = useMemo(() => computePredictions(), []);
+
+  // Seed for re-randomizing predictions on button click
+  const [predictionSeed, setPredictionSeed] = useState<number>(0);
+  const [regenCount, setRegenCount] = useState(0);
+  const [lastRegen, setLastRegen] = useState<string>("");
+
+  const predictions = useMemo(() => computePredictions(predictionSeed || undefined), [predictionSeed]);
   const aggregate = useMemo(() => computeAggregate(), []);
   const oddEven = useMemo(() => computeOddEven(), []);
   const highLow = useMemo(() => computeHighLow(), []);
@@ -59,6 +65,19 @@ export default function Home() {
 
   const sortedPbGaps = [...pbGaps].sort((a, b) => b.dueScore - a.dueScore);
   const pbMaxDue = Math.max(...sortedPbGaps.map((g) => g.dueScore));
+
+  const handleRegenerate = () => {
+    // Date.now() guarantees a unique seed every click
+    setPredictionSeed(Date.now() & 0x7fffffff);
+    setRegenCount((c) => c + 1);
+    setLastRegen(new Date().toLocaleTimeString());
+  };
+
+  const handleReset = () => {
+    setPredictionSeed(0);
+    setRegenCount(0);
+    setLastRegen("");
+  };
 
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 selection:bg-cyan-500/30">
@@ -213,11 +232,42 @@ export default function Home() {
           {/* PREDICTIONS */}
           {/* ============================================================ */}
           <section>
-            <SectionHeader
-              title="Ensemble Predictions — Next Draw"
-              subtitle="Five independent mathematical strategies. Each set is 7 main numbers (1-35) + 1 Powerball (1-20)."
-              badge="MONTE-CARLO · MARKOV · BAYESIAN"
-            />
+            <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-5">
+              <div>
+                <h2 className="text-xl sm:text-2xl font-bold tracking-tight text-white">
+                  Ensemble Predictions — Next Draw
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-400 mt-1">
+                  Five independent mathematical strategies. Each set is 7 main numbers (1-35) + 1 Powerball (1-20).
+                </p>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                {predictionSeed > 0 && (
+                  <Badge
+                    variant="outline"
+                    className="border-amber-500/40 text-amber-300 font-mono text-[10px] flex items-center gap-1.5"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
+                    SEED #{regenCount} · {lastRegen}
+                  </Badge>
+                )}
+                {predictionSeed > 0 && (
+                  <button
+                    onClick={handleReset}
+                    className="px-3 py-1.5 rounded-lg border border-slate-700 bg-slate-900/60 text-slate-300 font-mono text-[11px] hover:bg-slate-800 hover:text-white transition-colors"
+                  >
+                    ↺ Reset to default
+                  </button>
+                )}
+                <button
+                  onClick={handleRegenerate}
+                  className="px-4 py-2 rounded-lg border border-cyan-500/50 bg-gradient-to-br from-cyan-500/20 to-emerald-500/20 text-cyan-200 font-mono text-xs font-semibold hover:from-cyan-500/30 hover:to-emerald-500/30 hover:text-white transition-all shadow-[0_0_20px_rgba(34,211,238,0.25)] hover:shadow-[0_0_30px_rgba(34,211,238,0.4)] active:scale-95 flex items-center gap-2"
+                >
+                  <span className="text-base">⚡</span>
+                  Generate New Numbers
+                </button>
+              </div>
+            </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-5">
               {predictions.map((p) => (
                 <StrategyCard key={p.id} strategy={p} />
