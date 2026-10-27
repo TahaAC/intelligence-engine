@@ -54,3 +54,4 @@ server.log
 /skills/db/
 scripts/ozlotto-tab.png
 db/
+scripts/*.png

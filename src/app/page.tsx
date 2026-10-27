@@ -11,10 +11,14 @@ import { Progress } from "@/components/ui/progress";
 import {
   computeFrequency,
   computeSecondaryFrequency,
+  computeFrequencyWithCI,
+  computeSecondaryFrequencyWithCI,
   computeHotCold,
   computeSecondaryHotCold,
   computeGaps,
   computeSecondaryGaps,
+  computeGapDistribution,
+  computeSecondaryGapDistribution,
   computeSums,
   computeMarkov,
   computeBayes,
@@ -67,6 +71,22 @@ export default function Home() {
   const highLow = useMemo(() => computeHighLow(game), [game, drawsVersion]);
   const consecutive = useMemo(() => computeConsecutivePairs(game), [game, drawsVersion]);
   const aggregate = useMemo(() => computeAggregate(game), [game, drawsVersion]);
+
+  // K-S gap distribution analysis + frequency with CI (more rigorous stats)
+  const gapDistribution = useMemo(() => computeGapDistribution(game), [game, drawsVersion]);
+  const secGapDistribution = useMemo(() => computeSecondaryGapDistribution(game), [game, drawsVersion]);
+  const frequencyWithCI = useMemo(() => computeFrequencyWithCI(game), [game, drawsVersion]);
+  const secFrequencyWithCI = useMemo(() => computeSecondaryFrequencyWithCI(game), [game, drawsVersion]);
+
+  // Sort K-S results to show most-anomalous numbers first
+  const sortedKsMain = useMemo(
+    () => [...gapDistribution].sort((a, b) => b.ksStatistic - a.ksStatistic).slice(0, 8),
+    [gapDistribution]
+  );
+  const sortedKsSec = useMemo(
+    () => [...secGapDistribution].sort((a, b) => b.ksStatistic - a.ksStatistic).slice(0, 5),
+    [secGapDistribution]
+  );
 
   const predictions = useMemo(
     () => computePredictions(game, predictionSeed || undefined),
@@ -656,6 +676,218 @@ export default function Home() {
                   <div className="text-2xl font-bold font-mono text-fuchsia-300 mb-1">{consecutive.totalPairs}</div>
                   <div className="text-[10px] font-mono text-slate-400">across {consecutive.drawsWithPair}/{aggregate.totalDraws} draws</div>
                   <div className="text-[10px] font-mono text-slate-400 mt-2">{consecutive.percentageDrawsWithPair.toFixed(1)}% of draws had ≥1 pair</div>
+                </CardContent>
+              </Card>
+            </div>
+          </section>
+
+          {/* K-S GAP DISTRIBUTION TEST (more rigorous statistical analysis) */}
+          <section>
+            <SectionHeader
+              title={`K-S Gap Distribution Test — ${config.label}`}
+              subtitle="Kolmogorov-Smirnov test of each number's gap sequence against the theoretical geometric distribution. Tests whether the gaps are statistically consistent with independent random draws."
+              badge="KOLMOGOROV-SMIRNOV · GEOMETRIC"
+            />
+            <div className="grid lg:grid-cols-2 gap-4 mt-5">
+              {/* MAIN K-S results */}
+              <Card className="bg-slate-950/50 border-slate-800">
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <div className="text-lg font-mono text-fuchsia-400">D</div>
+                    <CardTitle className="text-sm font-mono text-fuchsia-300 tracking-wider">
+                      K-S · MAIN NUMBERS — Top 8 by D statistic
+                    </CardTitle>
+                  </div>
+                  <CardDescription className="text-slate-400 text-xs">
+                    H0: gaps follow geometric distribution with p = {config.mainNumbersPerDraw}/{config.mainMax} = {(config.mainNumbersPerDraw / config.mainMax).toFixed(3)}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {sortedKsMain.map((r) => {
+                      const ratio = r.criticalValue05 > 0 ? r.ksStatistic / r.criticalValue05 : 0;
+                      const passColor = r.isConsistentWithRandom ? "bg-emerald-500" : "bg-rose-500";
+                      return (
+                        <div key={r.number} className="flex items-center gap-2 text-xs">
+                          <NumberBall value={r.number} size="sm" variant="default" />
+                          <div className="flex-1 min-w-0 grid grid-cols-3 gap-2 font-mono text-[10px]">
+                            <div className="text-slate-300">
+                              D=<span className="text-cyan-400">{r.ksStatistic.toFixed(3)}</span>
+                            </div>
+                            <div className="text-slate-400">
+                              crit=<span className="text-slate-300">{r.criticalValue05.toFixed(3)}</span>
+                            </div>
+                            <div className={r.isConsistentWithRandom ? "text-emerald-400" : "text-rose-400"}>
+                              p≈{r.pValue < 0.001 ? "<0.001" : r.pValue.toFixed(3)}
+                            </div>
+                          </div>
+                          <div className="w-16 h-1.5 bg-slate-800 rounded overflow-hidden">
+                            <div className={`h-full ${passColor}`} style={{ width: `${Math.min(100, ratio * 100)}%` }} />
+                          </div>
+                          <div className={`text-[10px] font-mono w-6 text-right ${r.isConsistentWithRandom ? "text-emerald-400" : "text-rose-400"}`}>
+                            {r.isConsistentWithRandom ? "PASS" : "FAIL"}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-3 text-[10px] font-mono text-slate-500 leading-relaxed">
+                    Observed mean gap {gapDistribution.length > 0 ? (gapDistribution.reduce((s, r) => s + r.observedMeanGap, 0) / gapDistribution.length).toFixed(2) : "—"} vs theoretical mean {(1 / (config.mainNumbersPerDraw / config.mainMax) - 1).toFixed(2)}. A PASS verdict means the number's gap sequence is statistically consistent with random drawing.
+                  </p>
+                </CardContent>
+              </Card>
+
+              {/* SECONDARY K-S results */}
+              <Card className={`bg-slate-950/50 ${config.hasPowerball ? "border-rose-500/30" : "border-amber-500/30"}`}>
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <div className={`text-lg font-mono ${config.hasPowerball ? "text-rose-400" : "text-amber-400"}`}>D</div>
+                    <CardTitle className={`text-sm font-mono tracking-wider ${config.hasPowerball ? "text-rose-300" : "text-amber-300"}`}>
+                      K-S · {secLabel.toUpperCase()} — Top 5 by D statistic
+                    </CardTitle>
+                  </div>
+                  <CardDescription className="text-slate-400 text-xs">
+                    H0: gaps follow geometric distribution with p = {secCountPerDraw}/{secMaxRange} = {(secCountPerDraw / secMaxRange).toFixed(3)}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-2">
+                    {sortedKsSec.map((r) => {
+                      const ratio = r.criticalValue05 > 0 ? r.ksStatistic / r.criticalValue05 : 0;
+                      const passColor = r.isConsistentWithRandom ? "bg-emerald-500" : "bg-rose-500";
+                      return (
+                        <div key={r.number} className="flex items-center gap-2 text-xs">
+                          <NumberBall value={r.number} size="sm" variant={config.hasPowerball ? "powerball" : "cold"} showLeading={!config.hasPowerball} />
+                          <div className="flex-1 min-w-0 grid grid-cols-3 gap-2 font-mono text-[10px]">
+                            <div className="text-slate-300">
+                              D=<span className="text-cyan-400">{r.ksStatistic.toFixed(3)}</span>
+                            </div>
+                            <div className="text-slate-400">
+                              crit=<span className="text-slate-300">{r.criticalValue05.toFixed(3)}</span>
+                            </div>
+                            <div className={r.isConsistentWithRandom ? "text-emerald-400" : "text-rose-400"}>
+                              p≈{r.pValue < 0.001 ? "<0.001" : r.pValue.toFixed(3)}
+                            </div>
+                          </div>
+                          <div className="w-16 h-1.5 bg-slate-800 rounded overflow-hidden">
+                            <div className={`h-full ${passColor}`} style={{ width: `${Math.min(100, ratio * 100)}%` }} />
+                          </div>
+                          <div className={`text-[10px] font-mono w-6 text-right ${r.isConsistentWithRandom ? "text-emerald-400" : "text-rose-400"}`}>
+                            {r.isConsistentWithRandom ? "PASS" : "FAIL"}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-3 text-[10px] font-mono text-slate-500 leading-relaxed">
+                    Observed mean gap {secGapDistribution.length > 0 ? (secGapDistribution.reduce((s, r) => s + r.observedMeanGap, 0) / secGapDistribution.length).toFixed(2) : "—"} vs theoretical mean {(1 / (secCountPerDraw / secMaxRange) - 1).toFixed(2)}.
+                  </p>
+                </CardContent>
+              </Card>
+            </div>
+          </section>
+
+          {/* FREQUENCY WITH CONFIDENCE INTERVALS */}
+          <section>
+            <SectionHeader
+              title={`Frequency with 95% Confidence Intervals — ${config.label}`}
+              subtitle="Empirical count per number with the theoretical 95% confidence band. Numbers whose count falls outside the band are statistical outliers."
+              badge="95% CI · BINOMIAL"
+            />
+            <div className="grid lg:grid-cols-3 gap-4 mt-5">
+              <Card className="lg:col-span-2 bg-slate-950/50 border-slate-800">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-sm font-mono text-slate-300">
+                    MAIN · CI band visualization
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1.5 max-h-[400px] overflow-y-auto pr-1">
+                    {frequencyWithCI.map((r) => {
+                      const maxCount = Math.max(...frequencyWithCI.map(f => f.count));
+                      const maxBar = Math.max(maxCount, r.ciUpper);
+                      const countWidth = (r.count / maxBar) * 100;
+                      const ciLowerWidth = (r.ciLower / maxBar) * 100;
+                      const ciUpperWidth = (r.ciUpper / maxBar) * 100;
+                      const expectedWidth = (r.expectedCount / maxBar) * 100;
+                      return (
+                        <div key={r.number} className="flex items-center gap-2">
+                          <span className="text-[10px] font-mono text-slate-400 w-6 text-right">{r.number.toString().padStart(2, "0")}</span>
+                          <div className="flex-1 relative h-3 bg-slate-900/60 rounded overflow-hidden">
+                            {/* CI band */}
+                            <div
+                              className="absolute h-full bg-amber-500/15"
+                              style={{ left: `${ciLowerWidth}%`, width: `${ciUpperWidth - ciLowerWidth}%` }}
+                              title={`95% CI: ${r.ciLower.toFixed(1)} - ${r.ciUpper.toFixed(1)}`}
+                            />
+                            {/* Expected line */}
+                            <div
+                              className="absolute top-0 h-full w-px bg-amber-400/80"
+                              style={{ left: `${expectedWidth}%` }}
+                              title={`Expected: ${r.expectedCount.toFixed(2)}`}
+                            />
+                            {/* Observed bar */}
+                            <div
+                              className={`relative h-full ${r.isOutlier ? "bg-rose-500" : "bg-cyan-500"}`}
+                              style={{ width: `${countWidth}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-300 w-10 text-right">{r.count}×</span>
+                          <span className={`text-[10px] font-mono w-10 text-right ${r.isOutlier ? "text-rose-400 font-bold" : "text-emerald-400"}`}>
+                            {r.isOutlier ? "OUT" : "ok"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <p className="mt-3 text-[10px] font-mono text-slate-500">
+                    Cyan bar = observed count · Amber band = 95% CI · Amber line = expected count · Red = outlier (count outside CI)
+                  </p>
+                </CardContent>
+              </Card>
+
+              <Card className={`bg-slate-950/50 ${config.hasPowerball ? "border-rose-500/30" : "border-amber-500/30"}`}>
+                <CardHeader className="pb-3">
+                  <CardTitle className={`text-sm font-mono ${config.hasPowerball ? "text-rose-300" : "text-amber-300"}`}>
+                    {secLabel.toUpperCase()} · CI band visualization
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1.5 max-h-[400px] overflow-y-auto pr-1">
+                    {secFrequencyWithCI.map((r) => {
+                      const maxCount = Math.max(...secFrequencyWithCI.map(f => f.count));
+                      const maxBar = Math.max(maxCount, r.ciUpper);
+                      const countWidth = (r.count / maxBar) * 100;
+                      const ciLowerWidth = (r.ciLower / maxBar) * 100;
+                      const ciUpperWidth = (r.ciUpper / maxBar) * 100;
+                      const expectedWidth = (r.expectedCount / maxBar) * 100;
+                      return (
+                        <div key={r.number} className="flex items-center gap-2">
+                          <span className="text-[10px] font-mono text-slate-400 w-6 text-right">{r.number.toString().padStart(2, "0")}</span>
+                          <div className="flex-1 relative h-3 bg-slate-900/60 rounded overflow-hidden">
+                            <div
+                              className="absolute h-full bg-amber-500/15"
+                              style={{ left: `${ciLowerWidth}%`, width: `${ciUpperWidth - ciLowerWidth}%` }}
+                              title={`95% CI: ${r.ciLower.toFixed(1)} - ${r.ciUpper.toFixed(1)}`}
+                            />
+                            <div
+                              className="absolute top-0 h-full w-px bg-amber-400/80"
+                              style={{ left: `${expectedWidth}%` }}
+                              title={`Expected: ${r.expectedCount.toFixed(2)}`}
+                            />
+                            <div
+                              className={`relative h-full ${r.isOutlier ? "bg-rose-500" : config.hasPowerball ? "bg-rose-500" : "bg-amber-500"}`}
+                              style={{ width: `${countWidth}%` }}
+                            />
+                          </div>
+                          <span className="text-[10px] font-mono text-slate-300 w-10 text-right">{r.count}×</span>
+                          <span className={`text-[10px] font-mono w-10 text-right ${r.isOutlier ? "text-rose-400 font-bold" : "text-emerald-400"}`}>
+                            {r.isOutlier ? "OUT" : "ok"}
+                          </span>
+                        </div>
+                      );
+                    })}
+                  </div>
                 </CardContent>
               </Card>
             </div>

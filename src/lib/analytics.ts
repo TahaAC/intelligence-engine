@@ -198,6 +198,175 @@ export function computeSecondaryGaps(game: GameId = "powerball"): GapRecord[] {
 }
 
 // -----------------------------------------------------------------------------
+// 3b. K-S TEST FOR GEOMETRIC DISTRIBUTION (gap distribution analysis)
+// -----------------------------------------------------------------------------
+// For each number, compute the gap sequence and test whether it follows the
+// theoretical geometric distribution that random independent draws should
+// produce. K-S statistic = max |empirical_CDF - theoretical_CDF|.
+// Critical value at α=0.05: 1.36 / sqrt(n) where n is number of gaps.
+
+export interface GapDistributionResult {
+  number: number;
+  gaps: number[];                  // observed gaps (draws between appearances)
+  gapCount: number;
+  observedMeanGap: number;
+  theoreticalMeanGap: number;      // (1/p) - 1 where p = m_drawn / n_pool
+  ksStatistic: number;
+  pValue: number;                  // approximate p-value via Kolmogorov CDF
+  criticalValue05: number;         // 1.36 / sqrt(n)
+  isConsistentWithRandom: boolean; // true if K-S statistic < critical value
+  interpretation: string;
+}
+
+// Kolmogorov CDF approximation for K-S test p-value.
+function kolmogorovPValueApprox(ksStat: number, n: number): number {
+  if (n === 0) return 1;
+  const lambda = (Math.sqrt(n) + 0.12 + 0.11 / Math.sqrt(n)) * ksStat;
+  if (lambda < 0.18) return 1;
+  // Series: 2 * Σ_{k=1}^∞ (-1)^(k-1) * exp(-2 k² λ²)
+  let sum = 0;
+  for (let k = 1; k <= 100; k++) {
+    const term = Math.pow(-1, k - 1) * Math.exp(-2 * k * k * lambda * lambda);
+    sum += term;
+    if (Math.abs(term) < 1e-10) break;
+  }
+  return Math.max(0, Math.min(1, 2 * sum));
+}
+
+function computeGapDistributionForNumber(
+  number: number,
+  draws: number[][],  // array of draws, each draw is array of numbers containing this number or not
+  p: number,          // probability of single number per draw (m_drawn / n_pool)
+): GapDistributionResult {
+  // Indices where this number appeared
+  const appearances: number[] = [];
+  draws.forEach((draw, idx) => {
+    if (draw.includes(number)) appearances.push(idx);
+  });
+
+  // Gaps = draws between consecutive appearances minus 1 (gap of 0 = consecutive draws)
+  const gaps: number[] = [];
+  for (let i = 1; i < appearances.length; i++) {
+    gaps.push(appearances[i] - appearances[i - 1] - 1);
+  }
+
+  const gapCount = gaps.length;
+  const observedMeanGap = gapCount > 0 ? gaps.reduce((s, g) => s + g, 0) / gapCount : 0;
+  const theoreticalMeanGap = (1 / p) - 1;
+
+  // K-S test against geometric distribution
+  // Geometric CDF: P(X <= k) = 1 - (1-p)^k for k >= 1
+  let ksStatistic = 0;
+  if (gapCount >= 5) {
+    const sortedGaps = [...gaps].sort((a, b) => a - b);
+    const n = sortedGaps.length;
+    for (let i = 0; i < n; i++) {
+      const shifted = sortedGaps[i] + 1;
+      const empiricalCDF = (i + 1) / n;
+      const theoreticalCDF = 1 - Math.pow(1 - p, shifted);
+      const diff1 = Math.abs(empiricalCDF - theoreticalCDF);
+      const diff2 = i > 0 ? Math.abs(i / n - theoreticalCDF) : 0;
+      ksStatistic = Math.max(ksStatistic, diff1, diff2);
+    }
+  }
+
+  const pValue = kolmogorovPValueApprox(ksStatistic, gapCount);
+  const criticalValue05 = gapCount > 0 ? 1.36 / Math.sqrt(gapCount) : 0;
+  const isConsistent = ksStatistic < criticalValue05;
+
+  let interpretation: string;
+  if (gapCount < 5) {
+    interpretation = `Insufficient data (${gapCount} gaps observed)`;
+  } else if (isConsistent) {
+    interpretation = `Gap distribution is statistically consistent with the theoretical geometric distribution. Number behaves as expected under independent random draws.`;
+  } else {
+    interpretation = `Gap distribution deviates from geometric — possible anomaly (or just statistical noise).`;
+  }
+
+  return {
+    number,
+    gaps,
+    gapCount,
+    observedMeanGap,
+    theoreticalMeanGap,
+    ksStatistic,
+    pValue,
+    criticalValue05,
+    isConsistentWithRandom: isConsistent,
+    interpretation,
+  };
+}
+
+export function computeGapDistribution(game: GameId = "powerball"): GapDistributionResult[] {
+  const config = getGameConfig(game);
+  const allNumbers = Array.from({ length: config.mainMax }, (_, i) => i + 1);
+  const mainDraws = getMainDraws(game);
+  const p = config.mainNumbersPerDraw / config.mainMax;
+  return allNumbers.map((n) => computeGapDistributionForNumber(n, mainDraws, p));
+}
+
+export function computeSecondaryGapDistribution(game: GameId = "powerball"): GapDistributionResult[] {
+  const config = getGameConfig(game);
+  const secMax = config.hasPowerball ? config.powerballMax : config.supplementaryMax;
+  const allNumbers = Array.from({ length: secMax }, (_, i) => i + 1);
+
+  const secDraws: number[][] = getDraws(game).map((d) => {
+    if (config.hasPowerball) {
+      return d.powerball != null ? [d.powerball] : [];
+    }
+    return Array.isArray(d.supplementaryNumbers) ? d.supplementaryNumbers : [];
+  });
+
+  const appearancesPerDraw = config.hasPowerball ? 1 : config.supplementaryCount;
+  const p = appearancesPerDraw / secMax;
+  return allNumbers.map((n) => computeGapDistributionForNumber(n, secDraws, p));
+}
+
+// -----------------------------------------------------------------------------
+// 3c. CONFIDENCE INTERVALS for frequency analysis
+// -----------------------------------------------------------------------------
+// For each number, compute the 95% confidence interval around the expected
+// frequency. Numbers whose observed count falls outside this interval are
+// statistical outliers (potentially biased, though rare in random draws).
+
+export interface FrequencyWithCI extends FrequencyRecord {
+  ciLower: number;       // expected - 1.96 * stdDev
+  ciUpper: number;       // expected + 1.96 * stdDev
+  stdDev: number;        // sqrt(T * p * (1-p)) where T = total appearances slots
+  isOutlier: boolean;    // true if count falls outside CI
+}
+
+export function computeFrequencyWithCI(game: GameId = "powerball"): FrequencyWithCI[] {
+  const config = getGameConfig(game);
+  const freq = computeFrequency(game);
+  const T = getDraws(game).length * config.mainNumbersPerDraw;
+  const p = config.mainNumbersPerDraw / config.mainMax;
+  const stdDev = Math.sqrt(T * p * (1 - p));
+  return freq.map((r) => {
+    const ciLower = r.expectedCount - 1.96 * stdDev;
+    const ciUpper = r.expectedCount + 1.96 * stdDev;
+    const isOutlier = r.count < ciLower || r.count > ciUpper;
+    return { ...r, ciLower, ciUpper, stdDev, isOutlier };
+  });
+}
+
+export function computeSecondaryFrequencyWithCI(game: GameId = "powerball"): FrequencyWithCI[] {
+  const config = getGameConfig(game);
+  const secMax = config.hasPowerball ? config.powerballMax : config.supplementaryMax;
+  const freq = computeSecondaryFrequency(game);
+  const appearancesPerDraw = config.hasPowerball ? 1 : config.supplementaryCount;
+  const T = getDraws(game).length * appearancesPerDraw;
+  const p = appearancesPerDraw / secMax;
+  const stdDev = Math.sqrt(T * p * (1 - p));
+  return freq.map((r) => {
+    const ciLower = r.expectedCount - 1.96 * stdDev;
+    const ciUpper = r.expectedCount + 1.96 * stdDev;
+    const isOutlier = r.count < ciLower || r.count > ciUpper;
+    return { ...r, ciLower, ciUpper, stdDev, isOutlier };
+  });
+}
+
+// -----------------------------------------------------------------------------
 // 4. ODD/EVEN & HIGH/LOW — MAIN only
 // -----------------------------------------------------------------------------
 export interface OddEvenResult {
