@@ -9,7 +9,7 @@ export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
 
 function isValidGame(game: string | null): game is GameId {
-  return game === "powerball" || game === "oz-lotto";
+  return game === "powerball" || game === "oz-lotto" || game === "saturday-lotto";
 }
 
 export async function GET(req: Request) {

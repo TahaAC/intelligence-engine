@@ -4,6 +4,7 @@
 
 import { LOTTERY_DRAWS, type Draw as PowerballDraw } from "./lottery-data";
 import { OZLOTTO_DRAWS, type OzLottoDraw } from "./lottery-data-ozlotto";
+import { SATURDAYLOTTO_DRAWS, type SaturdayLottoDraw } from "./lottery-data-saturdaylotto";
 import type { GameId } from "./game-config";
 
 export interface UnifiedDraw {
@@ -13,7 +14,7 @@ export interface UnifiedDraw {
   dateLabel: string;
   mainNumbers: number[];
   powerball?: number | null; // for powerball game
-  supplementaryNumbers?: number[] | null; // for oz-lotto game
+  supplementaryNumbers?: number[] | null; // for oz-lotto / saturday-lotto
 }
 
 const stores: Record<GameId, UnifiedDraw[]> = {
@@ -28,6 +29,15 @@ const stores: Record<GameId, UnifiedDraw[]> = {
   })),
   "oz-lotto": OZLOTTO_DRAWS.map((d: OzLottoDraw) => ({
     game: "oz-lotto",
+    drawNumber: d.drawNumber,
+    date: d.date,
+    dateLabel: d.dateLabel,
+    mainNumbers: d.mainNumbers,
+    powerball: null,
+    supplementaryNumbers: d.supplementaryNumbers,
+  })),
+  "saturday-lotto": SATURDAYLOTTO_DRAWS.map((d: SaturdayLottoDraw) => ({
+    game: "saturday-lotto",
     drawNumber: d.drawNumber,
     date: d.date,
     dateLabel: d.dateLabel,
@@ -52,5 +62,5 @@ export function getLatestDraw(game: GameId = "powerball"): UnifiedDraw | null {
 }
 
 export function getAllDraws(): UnifiedDraw[] {
-  return [...stores.powerball, ...stores["oz-lotto"]];
+  return [...stores.powerball, ...stores["oz-lotto"], ...stores["saturday-lotto"]];
 }

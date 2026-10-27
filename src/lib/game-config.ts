@@ -1,7 +1,7 @@
 // Game configuration for multi-game support.
 // Each game has its own number range and source URL for scraping.
 
-export type GameId = "powerball" | "oz-lotto";
+export type GameId = "powerball" | "oz-lotto" | "saturday-lotto";
 
 export interface GameConfig {
   game: GameId;
@@ -61,6 +61,24 @@ export const GAMES: Record<GameId, GameConfig> = {
     sourceUrl: "https://australia.national-lottery.com/oz-lotto/past-results",
     resultsPathPrefix: "/oz-lotto/results/",
     ballCount: 10,
+    secondaryClass: "supplementary",
+  },
+  "saturday-lotto": {
+    game: "saturday-lotto",
+    label: "Saturday Lotto",
+    shortLabel: "SAT",
+    mainNumbersPerDraw: 6,
+    mainMin: 1,
+    mainMax: 45,
+    hasPowerball: false,
+    powerballMax: 0,
+    supplementaryCount: 2,
+    supplementaryMin: 1,
+    supplementaryMax: 45,
+    drawDay: "Saturday",
+    sourceUrl: "https://australia.national-lottery.com/saturday-lotto/past-results",
+    resultsPathPrefix: "/saturday-lotto/results/",
+    ballCount: 8,
     secondaryClass: "supplementary",
   },
 };

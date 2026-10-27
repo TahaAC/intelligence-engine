@@ -321,7 +321,7 @@ export default function Home() {
                     DRAW #{latestDraw?.drawNumber ?? "—"} · {latestDraw?.dateLabel ?? "—"}
                   </Badge>
                   <h2 className="text-3xl sm:text-4xl font-bold tracking-tight mb-3 bg-gradient-to-r from-white via-cyan-100 to-cyan-300 bg-clip-text text-transparent">
-                    Latest Draw · 7 Main + {secCountPerDraw} {secLabel}
+                    Latest Draw · {config.mainNumbersPerDraw} Main + {secCountPerDraw} {secLabel}
                   </h2>
                   <p className="text-slate-300/80 text-sm sm:text-base leading-relaxed mb-6">
                     Crunched {aggregate.totalDraws} historical {config.label} draws
