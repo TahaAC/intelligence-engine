@@ -1,7 +1,7 @@
 // Game configuration for multi-game support.
 // Each game has its own number range and source URL for scraping.
 
-export type GameId = "powerball" | "oz-lotto" | "saturday-lotto";
+export type GameId = "powerball" | "oz-lotto" | "saturday-lotto" | "set-for-life";
 
 export interface GameConfig {
   game: GameId;
@@ -80,6 +80,24 @@ export const GAMES: Record<GameId, GameConfig> = {
     resultsPathPrefix: "/saturday-lotto/results/",
     ballCount: 8,
     secondaryClass: "supplementary",
+  },
+  "set-for-life": {
+    game: "set-for-life",
+    label: "Set for Life",
+    shortLabel: "SFL",
+    mainNumbersPerDraw: 7,
+    mainMin: 1,
+    mainMax: 44,
+    hasPowerball: false,
+    powerballMax: 0,
+    supplementaryCount: 2,
+    supplementaryMin: 1,
+    supplementaryMax: 44,
+    drawDay: "Daily",
+    sourceUrl: "https://australia.national-lottery.com/set-for-life/past-results",
+    resultsPathPrefix: "/set-for-life/results/",
+    ballCount: 9,
+    secondaryClass: "bonus-ball",
   },
 };
 

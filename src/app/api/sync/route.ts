@@ -13,7 +13,7 @@ const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36";
 
 function isValidGame(game: string | null): game is GameId {
-  return game === "powerball" || game === "oz-lotto" || game === "saturday-lotto";
+  return game === "powerball" || game === "oz-lotto" || game === "saturday-lotto" || game === "set-for-life";
 }
 
 interface ScrapedDraw {
