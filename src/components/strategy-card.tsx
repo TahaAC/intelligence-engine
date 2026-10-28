@@ -22,7 +22,14 @@ const iconMap: Record<string, string> = {
   statistical_norm: "∑",
 };
 
-export function StrategyCard({ strategy, game }: { strategy: StrategyResult; game: GameId }) {
+interface StrategyCardProps {
+  strategy: StrategyResult;
+  game: GameId;
+  onSave?: (pick: { label: string; source: string; mainNumbers: number[]; powerball?: number | null; supplementaryNumbers?: number[] | null }) => void;
+  saved?: boolean;
+}
+
+export function StrategyCard({ strategy, game, onSave, saved }: StrategyCardProps) {
   const config = getGameConfig(game);
   const secLabel = config.hasPowerball ? "Powerball" : "Supplementary";
   const secNumbers = config.hasPowerball
@@ -44,10 +51,29 @@ export function StrategyCard({ strategy, game }: { strategy: StrategyResult; gam
             <span className="text-[10px] uppercase tracking-wider text-slate-400 font-mono">{strategy.tagline}</span>
           </div>
         </div>
+        {onSave && (
+          <button
+            onClick={() => onSave({
+              label: strategy.name,
+              source: strategy.id,
+              mainNumbers: strategy.mainNumbers,
+              powerball: strategy.powerball ?? null,
+              supplementaryNumbers: strategy.supplementaryNumbers ?? null,
+            })}
+            disabled={saved}
+            title={saved ? "Saved" : "Save this pick"}
+            className={`shrink-0 w-8 h-8 rounded-md border font-mono text-sm transition-all flex items-center justify-center ${
+              saved
+                ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300 cursor-default"
+                : "border-slate-600 bg-slate-900/40 text-slate-300 hover:border-cyan-500/60 hover:bg-cyan-500/10 hover:text-cyan-200"
+            }`}
+          >
+            {saved ? "✓" : "💾"}
+          </button>
+        )}
       </div>
       <p className="text-xs text-slate-300/90 leading-relaxed mb-4 min-h-[3rem]">{strategy.description}</p>
       <div className="border-t border-slate-700/50 pt-3">
-        {/* Main numbers */}
         <div className="mb-3">
           <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-2 flex items-center gap-1.5">
             <span className="w-1 h-1 rounded-full bg-amber-400" />
@@ -59,7 +85,6 @@ export function StrategyCard({ strategy, game }: { strategy: StrategyResult; gam
             ))}
           </div>
         </div>
-        {/* Secondary numbers (Powerball OR supplementary) */}
         <div className="mt-3 pt-3 border-t border-slate-700/50">
           <div className="text-[10px] font-mono uppercase tracking-wider text-rose-400 mb-2 flex items-center gap-1.5">
             <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />

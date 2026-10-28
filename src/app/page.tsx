@@ -47,6 +47,7 @@ import { GAMES, GAME_IDS } from "@/lib/game-config";
 import { getDraws, setDraws, getLatestDraw, type UnifiedDraw } from "@/lib/draw-store";
 import { LOTTERY_DRAWS } from "@/lib/lottery-data";
 import { OZLOTTO_DRAWS } from "@/lib/lottery-data-ozlotto";
+import { useSavedPicks, type SavedPick } from "@/hooks/use-saved-picks";
 
 export default function Home() {
   // Currently selected game
@@ -118,6 +119,46 @@ export default function Home() {
   const methodPredictions = useMemo(
     () => computeMethodPredictions(game, predictionSeed || undefined),
     [game, predictionSeed, drawsVersion]
+  );
+
+  // Saved picks (localStorage-backed)
+  const { picks: savedPicks, savePick, deletePick, clearGame } = useSavedPicks();
+  const savedPicksForGame = useMemo(
+    () => savedPicks.filter((p) => p.game === game),
+    [savedPicks, game]
+  );
+
+  // Helper: compute match counts between a saved pick and the latest draw
+  const computeMatch = useCallback(
+    (pick: SavedPick) => {
+      const latest = getLatestDraw(pick.game);
+      if (!latest) return { mainMatches: 0, secMatches: 0, mainTotal: pick.mainNumbers.length, secTotal: 0, matchedMain: [], matchedSec: [] };
+      const config = getGameConfig(pick.game);
+      const matchedMain = pick.mainNumbers.filter((n) => latest.mainNumbers?.includes(n));
+      let matchedSec: number[] = [];
+      let secTotal = 0;
+      if (config.hasPowerball) {
+        secTotal = 1;
+        if (pick.powerball != null && latest.powerball === pick.powerball) {
+          matchedSec = [pick.powerball];
+        }
+      } else {
+        secTotal = config.supplementaryCount;
+        const latestSupp = latest.supplementaryNumbers ?? [];
+        matchedSec = (pick.supplementaryNumbers ?? []).filter((n) => latestSupp.includes(n));
+      }
+      return {
+        mainMatches: matchedMain.length,
+        secMatches: matchedSec.length,
+        mainTotal: pick.mainNumbers.length,
+        secTotal,
+        matchedMain,
+        matchedSec,
+        latestDrawNumber: latest.drawNumber,
+        latestDrawDate: latest.dateLabel,
+      };
+    },
+    []
   );
 
   const maxCount = Math.max(...frequency.map((f) => f.count));
@@ -439,9 +480,18 @@ export default function Home() {
               </div>
             </div>
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-5">
-              {predictions.map((p) => (
-                <StrategyCard key={p.id} strategy={p} game={game} />
-              ))}
+              {predictions.map((p) => {
+                const isSaved = savedPicksForGame.some((sp) => sp.source === p.id && JSON.stringify(sp.mainNumbers) === JSON.stringify(p.mainNumbers));
+                return (
+                  <StrategyCard
+                    key={p.id}
+                    strategy={p}
+                    game={game}
+                    onSave={(pick) => savePick({ ...pick, game })}
+                    saved={isSaved}
+                  />
+                );
+              })}
             </div>
 
             <Disclaimer game={game} />
@@ -459,6 +509,7 @@ export default function Home() {
                 const secNumbers = config.hasPowerball
                   ? (m.powerball != null ? [m.powerball] : [])
                   : (m.supplementaryNumbers ?? []);
+                const isSaved = savedPicksForGame.some((sp) => sp.source === m.id && JSON.stringify(sp.mainNumbers) === JSON.stringify(m.mainNumbers));
                 return (
                   <div
                     key={m.id}
@@ -466,9 +517,30 @@ export default function Home() {
                   >
                     <div className="flex items-baseline justify-between mb-1.5">
                       <h3 className="text-sm font-semibold text-white">{m.methodName}</h3>
-                      <span className="text-[9px] uppercase tracking-wider text-slate-400 font-mono">
-                        {m.methodTag}
-                      </span>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[9px] uppercase tracking-wider text-slate-400 font-mono">
+                          {m.methodTag}
+                        </span>
+                        <button
+                          onClick={() => savePick({
+                            game,
+                            label: m.methodName,
+                            source: m.id,
+                            mainNumbers: m.mainNumbers,
+                            powerball: m.powerball ?? null,
+                            supplementaryNumbers: m.supplementaryNumbers ?? null,
+                          })}
+                          disabled={isSaved}
+                          title={isSaved ? "Saved" : "Save this pick"}
+                          className={`w-6 h-6 rounded text-xs font-mono transition-all flex items-center justify-center ${
+                            isSaved
+                              ? "bg-emerald-500/10 text-emerald-300 border border-emerald-500/40 cursor-default"
+                              : "bg-slate-900/40 text-slate-300 border border-slate-600 hover:border-cyan-500/60 hover:bg-cyan-500/10 hover:text-cyan-200"
+                          }`}
+                        >
+                          {isSaved ? "✓" : "💾"}
+                        </button>
+                      </div>
                     </div>
                     <p className="text-[10px] text-slate-400 leading-relaxed mb-3 min-h-[2rem]">
                       {m.rationale}
@@ -1304,6 +1376,129 @@ export default function Home() {
             />
             <div className="mt-5">
               <DrawHistoryTable draws={currentDraws} game={game} />
+            </div>
+          </section>
+
+          {/* SAVED PICKS TRACKER */}
+          <section>
+            <SectionHeader
+              title={`Saved Picks Tracker — ${config.label}`}
+              subtitle="Save predictions you want to play, then check them against the actual draw results. Picks are stored in your browser (localStorage) and persist across sessions."
+              badge={`${savedPicksForGame.length} SAVED`}
+            />
+            <div className="mt-5">
+              {savedPicksForGame.length === 0 ? (
+                <Card className="bg-slate-950/50 border-slate-800">
+                  <CardContent className="py-8 text-center">
+                    <div className="text-3xl mb-2">💾</div>
+                    <div className="text-sm font-mono text-slate-400">
+                      No saved picks for {config.label} yet.
+                    </div>
+                    <div className="text-[11px] font-mono text-slate-500 mt-1">
+                      Click the 💾 icon on any prediction card above to start tracking.
+                    </div>
+                  </CardContent>
+                </Card>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between mb-3">
+                    <div className="text-xs font-mono text-slate-400">
+                      Comparing against latest {config.label} draw: #{latestDraw?.drawNumber ?? "—"} ({latestDraw?.dateLabel ?? "—"})
+                    </div>
+                    <button
+                      onClick={() => clearGame(game)}
+                      className="px-3 py-1 rounded border border-rose-500/30 bg-rose-950/20 text-rose-300 font-mono text-[10px] hover:bg-rose-950/40 transition-colors"
+                    >
+                      Clear all {config.label} picks
+                    </button>
+                  </div>
+                  <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-3">
+                    {savedPicksForGame.map((sp) => {
+                      const match = computeMatch(sp);
+                      const totalMatches = match.mainMatches + match.secMatches;
+                      const isJackpot = match.mainMatches === match.mainTotal && match.secMatches === match.secTotal;
+                      return (
+                        <Card
+                          key={sp.id}
+                          className={`bg-slate-950/50 ${isJackpot ? "border-amber-500/60 shadow-[0_0_24px_rgba(251,191,36,0.3)]" : totalMatches >= 4 ? "border-emerald-500/40" : "border-slate-800"}`}
+                        >
+                          <CardContent className="pt-4 pb-4">
+                            <div className="flex items-baseline justify-between mb-2">
+                              <div>
+                                <div className="text-sm font-semibold text-white">{sp.label}</div>
+                                <div className="text-[10px] font-mono text-slate-500">
+                                  Saved: {new Date(sp.savedAt).toLocaleDateString()} {new Date(sp.savedAt).toLocaleTimeString()}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => deletePick(sp.id)}
+                                className="text-slate-500 hover:text-rose-400 text-xs font-mono px-1.5 py-0.5 rounded hover:bg-rose-950/20"
+                                title="Delete this pick"
+                              >
+                                ✕
+                              </button>
+                            </div>
+
+                            {/* Match summary */}
+                            <div className={`text-center rounded py-1.5 mb-3 ${isJackpot ? "bg-amber-500/15 text-amber-300" : totalMatches >= 4 ? "bg-emerald-500/10 text-emerald-300" : "bg-slate-900/40 text-slate-300"}`}>
+                              <div className="text-lg font-bold font-mono">
+                                {match.mainMatches}/{match.mainTotal} main
+                                {" + "}
+                                {match.secMatches}/{match.secTotal} {secShort}
+                              </div>
+                              {isJackpot && (
+                                <div className="text-[10px] font-mono uppercase tracking-wider">★ JACKPOT MATCH ★</div>
+                              )}
+                            </div>
+
+                            {/* Main numbers with match highlights */}
+                            <div className="mb-2">
+                              <div className="text-[9px] font-mono uppercase tracking-wider text-slate-500 mb-1.5">Main numbers</div>
+                              <div className="flex flex-wrap gap-1 justify-center">
+                                {sp.mainNumbers.map((n, i) => {
+                                  const isMatch = match.matchedMain.includes(n);
+                                  return (
+                                    <NumberBall
+                                      key={i}
+                                      value={n}
+                                      size="sm"
+                                      variant={isMatch ? "hot" : "default"}
+                                    />
+                                  );
+                                })}
+                              </div>
+                            </div>
+
+                            {/* Secondary numbers with match highlights */}
+                            <div>
+                              <div className={`text-[9px] font-mono uppercase tracking-wider mb-1.5 ${config.hasPowerball ? "text-rose-400" : "text-amber-400"}`}>
+                                {secLabel}
+                              </div>
+                              <div className="flex flex-wrap gap-1 justify-center">
+                                {(config.hasPowerball
+                                  ? (sp.powerball != null ? [sp.powerball] : [])
+                                  : (sp.supplementaryNumbers ?? [])
+                                ).map((n, i) => {
+                                  const isMatch = match.matchedSec.includes(n);
+                                  return (
+                                    <NumberBall
+                                      key={i}
+                                      value={n}
+                                      size="sm"
+                                      variant={isMatch ? "hot" : "powerball"}
+                                      showLeading={!config.hasPowerball}
+                                    />
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </CardContent>
+                        </Card>
+                      );
+                    })}
+                  </div>
+                </>
+              )}
             </div>
           </section>
 
