@@ -30,6 +30,15 @@ import {
   computeOddEven,
   computeHighLow,
   computeConsecutivePairs,
+  computeEntropy,
+  computeRunsTest,
+  computeAutocorrelation,
+  computePairCorrelation,
+  computeHypergeometricProb,
+  computeCoverage,
+  computeDistributionShape,
+  computeCouponCollector,
+  computeBirthdayProblem,
   getGameConfig,
   type GameId,
 } from "@/lib/analytics";
@@ -87,6 +96,17 @@ export default function Home() {
     () => [...secGapDistribution].sort((a, b) => b.ksStatistic - a.ksStatistic).slice(0, 5),
     [secGapDistribution]
   );
+
+  // Advanced Statistical Battery (additional methods from the internet)
+  const entropy = useMemo(() => computeEntropy(game), [game, drawsVersion]);
+  const runsTest = useMemo(() => computeRunsTest(game), [game, drawsVersion]);
+  const autocorr = useMemo(() => computeAutocorrelation(game), [game, drawsVersion]);
+  const pairCorrelation = useMemo(() => computePairCorrelation(game, 8), [game, drawsVersion]);
+  const hypergeom = useMemo(() => computeHypergeometricProb(game), [game, drawsVersion]);
+  const coverage = useMemo(() => computeCoverage(game), [game, drawsVersion]);
+  const distShape = useMemo(() => computeDistributionShape(game), [game, drawsVersion]);
+  const couponCollector = useMemo(() => computeCouponCollector(game), [game, drawsVersion]);
+  const birthdayProblem = useMemo(() => computeBirthdayProblem(game), [game, drawsVersion]);
 
   const predictions = useMemo(
     () => computePredictions(game, predictionSeed || undefined),
@@ -887,6 +907,200 @@ export default function Home() {
                         </div>
                       );
                     })}
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </section>
+
+          {/* ADVANCED STATISTICAL BATTERY */}
+          <section>
+            <SectionHeader
+              title={`Advanced Statistical Battery — ${config.label}`}
+              subtitle="9 additional statistical methods commonly applied to lottery analysis: entropy, runs test, autocorrelation, pair correlation, hypergeometric odds, coverage, skewness/kurtosis, coupon collector's problem, birthday problem."
+              badge="9 ADDITIONAL METHODS"
+            />
+            <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-4 mt-5">
+              {/* Shannon Entropy */}
+              <Card className="bg-slate-950/50 border-fuchsia-500/30">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-xs font-mono text-fuchsia-300 tracking-wider">SHANNON ENTROPY</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold font-mono text-cyan-300 mb-1">{entropy.entropy.toFixed(3)} <span className="text-sm text-slate-500">/ {entropy.maxEntropy.toFixed(3)}</span></div>
+                  <div className="text-[10px] font-mono text-slate-400 mb-2">bits (normalized: {(entropy.normalizedEntropy * 100).toFixed(2)}%)</div>
+                  <div className="h-1.5 bg-slate-800 rounded overflow-hidden mb-2">
+                    <div className="h-full bg-gradient-to-r from-fuchsia-500 to-cyan-500" style={{ width: `${entropy.normalizedEntropy * 100}%` }} />
+                  </div>
+                  <p className="text-[10px] font-mono text-slate-400 leading-relaxed">{entropy.interpretation}</p>
+                </CardContent>
+              </Card>
+
+              {/* Runs Test */}
+              <Card className={`bg-slate-950/50 border ${runsTest.isRandom ? "border-emerald-500/30" : "border-rose-500/30"}`}>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-xs font-mono text-slate-300 tracking-wider">WALD-WOLFOWITZ RUNS TEST</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold font-mono text-cyan-300 mb-1">{runsTest.observedRuns} <span className="text-sm text-slate-500">obs</span> / {runsTest.expectedRuns.toFixed(1)} <span className="text-sm text-slate-500">exp</span></div>
+                  <div className="text-[10px] font-mono text-slate-400 mb-2">z={runsTest.zScore.toFixed(3)} · p≈{runsTest.pValue < 0.001 ? "<0.001" : runsTest.pValue.toFixed(3)}</div>
+                  <div className={`text-[10px] font-mono ${runsTest.isRandom ? "text-emerald-400" : "text-rose-400"} font-bold mb-1`}>
+                    {runsTest.isRandom ? "✓ PASS — random sequence" : "✗ FAIL — non-random"}
+                  </div>
+                  <p className="text-[10px] font-mono text-slate-400 leading-relaxed">{runsTest.interpretation}</p>
+                </CardContent>
+              </Card>
+
+              {/* Lag-1 Autocorrelation */}
+              <Card className={`bg-slate-950/50 border ${autocorr.isSignificant ? "border-rose-500/30" : "border-emerald-500/30"}`}>
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-xs font-mono text-slate-300 tracking-wider">LAG-1 AUTOCORRELATION</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold font-mono text-cyan-300 mb-1">r₁ = {autocorr.autocorrelation.toFixed(4)}</div>
+                  <div className="text-[10px] font-mono text-slate-400 mb-2">critical ±{autocorr.criticalValue.toFixed(4)} (n={autocorr.n})</div>
+                  <div className={`text-[10px] font-mono ${autocorr.isSignificant ? "text-rose-400" : "text-emerald-400"} font-bold mb-1`}>
+                    {autocorr.isSignificant ? "✗ ANOMALY — draws not independent" : "✓ Draws are independent"}
+                  </div>
+                  <p className="text-[10px] font-mono text-slate-400 leading-relaxed">{autocorr.interpretation}</p>
+                </CardContent>
+              </Card>
+
+              {/* Coverage */}
+              <Card className="bg-slate-950/50 border-cyan-500/30">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-xs font-mono text-cyan-300 tracking-wider">COVERAGE ANALYSIS</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold font-mono text-cyan-300 mb-1">
+                    {(coverage.mainCoverage * 100).toFixed(1)}% <span className="text-sm text-slate-500">main</span>
+                  </div>
+                  <div className="text-[10px] font-mono text-slate-400 mb-2">{coverage.mainAppeared}/{coverage.mainTotal} main · {coverage.secondaryAppeared}/{coverage.secondaryTotal} {secLabel.toLowerCase()}</div>
+                  <div className="h-1.5 bg-slate-800 rounded overflow-hidden mb-1">
+                    <div className="h-full bg-cyan-500" style={{ width: `${coverage.mainCoverage * 100}%` }} />
+                  </div>
+                  <div className="h-1.5 bg-slate-800 rounded overflow-hidden mb-2">
+                    <div className={`h-full ${config.hasPowerball ? "bg-rose-500" : "bg-amber-500"}`} style={{ width: `${coverage.secondaryCoverage * 100}%` }} />
+                  </div>
+                  <p className="text-[10px] font-mono text-slate-400 leading-relaxed">{coverage.interpretation}</p>
+                </CardContent>
+              </Card>
+
+              {/* Coupon Collector's Problem */}
+              <Card className="bg-slate-950/50 border-amber-500/30">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-xs font-mono text-amber-300 tracking-wider">COUPON COLLECTOR'S PROBLEM</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold font-mono text-amber-300 mb-1">~{couponCollector.expectedDrawsToSeeAll.toFixed(0)}</div>
+                  <div className="text-[10px] font-mono text-slate-400 mb-2">draws expected to see all {couponCollector.poolSize} numbers</div>
+                  <div className="text-[10px] font-mono text-slate-400 mb-1">observed: {couponCollector.drawsObserved} draws ({((couponCollector.drawsObserved / couponCollector.expectedDrawsToSeeAll) * 100).toFixed(1)}%)</div>
+                  <p className="text-[10px] font-mono text-slate-400 leading-relaxed">{couponCollector.interpretation}</p>
+                </CardContent>
+              </Card>
+
+              {/* Birthday Problem */}
+              <Card className="bg-slate-950/50 border-rose-500/30">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-xs font-mono text-rose-300 tracking-wider">BIRTHDAY PROBLEM</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold font-mono text-rose-300 mb-1">{(birthdayProblem.probabilityOfSharedNumber * 100).toFixed(1)}%</div>
+                  <div className="text-[10px] font-mono text-slate-400 mb-2">prob. two random draws share ≥1 number</div>
+                  <div className="text-[10px] font-mono text-slate-400 mb-1">expected shared per pair: {birthdayProblem.expectedSharedNumbers.toFixed(2)}</div>
+                  <p className="text-[10px] font-mono text-slate-400 leading-relaxed">{birthdayProblem.interpretation}</p>
+                </CardContent>
+              </Card>
+
+              {/* Distribution Shape */}
+              <Card className="bg-slate-950/50 border-slate-800">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-xs font-mono text-slate-300 tracking-wider">SKEWNESS & KURTOSIS</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold font-mono text-cyan-300 mb-1">
+                    skew {distShape.skewness.toFixed(3)} · kurt {distShape.kurtosis.toFixed(3)}
+                  </div>
+                  <div className="text-[10px] font-mono text-slate-400 mb-2">mean={distShape.mean.toFixed(2)} σ={distShape.stdDev.toFixed(2)}</div>
+                  <p className="text-[10px] font-mono text-slate-400 leading-relaxed">{distShape.skewInterpretation}</p>
+                  <p className="text-[10px] font-mono text-slate-400 leading-relaxed mt-1">{distShape.kurtosisInterpretation}</p>
+                </CardContent>
+              </Card>
+
+              {/* Hypergeometric Probability Table */}
+              <Card className="bg-slate-950/50 border-emerald-500/30 md:col-span-2 lg:col-span-2">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-xs font-mono text-emerald-300 tracking-wider">HYPERGEOMETRIC ODDS · {config.label} MAIN</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-4 gap-2">
+                    {hypergeom.probabilityTable.map((row) => (
+                      <div key={row.matchCount} className="text-center bg-slate-900/40 border border-slate-800 rounded p-2">
+                        <div className="text-[10px] font-mono text-slate-400">Match {row.matchCount}</div>
+                        <div className="text-xs font-mono font-bold text-emerald-300">
+                          {(row.probability * 100).toExponential(1)}%
+                        </div>
+                        <div className="text-[9px] font-mono text-slate-500">
+                          1 in {row.oneIn === Infinity ? "∞" : row.oneIn.toLocaleString("en-US", { maximumFractionDigits: 0 })}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] font-mono text-slate-400 leading-relaxed mt-2">{hypergeom.interpretation}</p>
+                </CardContent>
+              </Card>
+            </div>
+
+            {/* Pair Correlation — Top Over/Under */}
+            <div className="grid md:grid-cols-2 gap-4 mt-4">
+              <Card className="bg-slate-950/50 border-rose-500/30">
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                    <CardTitle className="text-xs font-mono text-rose-300 tracking-wider">PAIRS APPEARING MORE THAN EXPECTED · Top 8</CardTitle>
+                  </div>
+                  <CardDescription className="text-slate-400 text-xs">
+                    Expected count per pair: {pairCorrelation.topOver[0]?.expectedCount.toFixed(2) ?? "—"} · significant: {pairCorrelation.significantPairs}/{pairCorrelation.totalPairsAnalyzed}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1.5">
+                    {pairCorrelation.topOver.map((p, i) => (
+                      <div key={i} className="flex items-center gap-2 text-xs font-mono">
+                        <span className="text-slate-400 w-12">{p.pair[0]}-{p.pair[1]}</span>
+                        <div className="flex-1 min-w-0 relative h-3 bg-slate-900/60 rounded overflow-hidden">
+                          <div className={`relative h-full ${p.isSignificant ? "bg-rose-500" : "bg-rose-500/60"}`} style={{ width: `${Math.min(100, (p.zScore / 2) * 100)}%` }} />
+                        </div>
+                        <span className="text-slate-300 w-12 text-right">{p.observedCount}×</span>
+                        <span className={`w-12 text-right ${p.isSignificant ? "text-rose-400 font-bold" : "text-amber-400"}`}>z={p.zScore.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card className="bg-slate-950/50 border-cyan-500/30">
+                <CardHeader>
+                  <div className="flex items-center gap-2">
+                    <div className="w-2 h-2 rounded-full bg-cyan-500" />
+                    <CardTitle className="text-xs font-mono text-cyan-300 tracking-wider">PAIRS APPEARING LESS THAN EXPECTED · Top 8</CardTitle>
+                  </div>
+                  <CardDescription className="text-slate-400 text-xs">
+                    Pairs that have not co-occurred as often as random would predict
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-1.5">
+                    {pairCorrelation.topUnder.map((p, i) => (
+                      <div key={i} className="flex items-center gap-2 text-xs font-mono">
+                        <span className="text-slate-400 w-12">{p.pair[0]}-{p.pair[1]}</span>
+                        <div className="flex-1 min-w-0 relative h-3 bg-slate-900/60 rounded overflow-hidden">
+                          <div className={`relative h-full ${p.isSignificant ? "bg-cyan-500" : "bg-cyan-500/60"}`} style={{ width: `${Math.min(100, (Math.abs(p.zScore) / 2) * 100)}%` }} />
+                        </div>
+                        <span className="text-slate-300 w-12 text-right">{p.observedCount}×</span>
+                        <span className={`w-12 text-right ${p.isSignificant ? "text-cyan-400 font-bold" : "text-slate-400"}`}>z={p.zScore.toFixed(2)}</span>
+                      </div>
+                    ))}
                   </div>
                 </CardContent>
               </Card>

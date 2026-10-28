@@ -500,6 +500,395 @@ export function computeConsecutivePairs(game: GameId = "powerball"): Consecutive
 }
 
 // -----------------------------------------------------------------------------
+// 6b. ADVANCED STATISTICAL BATTERY
+// -----------------------------------------------------------------------------
+// Additional statistical methods commonly applied to lottery analysis
+// (entropy, runs test, autocorrelation, pair correlation, hypergeometric
+// probability, coverage, skewness, kurtosis, coupon collector's problem).
+
+// Standard normal CDF approximation (Abramowitz & Stegun formula 7.1.26)
+function normalCdf(x: number): number {
+  const t = 1 / (1 + 0.2316419 * Math.abs(x));
+  const d = 0.3989423 * Math.exp(-x * x / 2);
+  let prob = d * t * (0.3193815 + t * (-0.3565638 + t * (1.781478 + t * (-1.821256 + t * 1.330274))));
+  return x > 0 ? 1 - prob : prob;
+}
+
+// Binomial coefficient C(n, k)
+function combinations(n: number, k: number): number {
+  if (k < 0 || k > n) return 0;
+  if (k > n - k) k = n - k;
+  let result = 1;
+  for (let i = 0; i < k; i++) {
+    result = result * (n - i) / (i + 1);
+  }
+  return result;
+}
+
+// (6b.1) Shannon entropy — measures randomness of the frequency distribution.
+// H = -Σ p_i × log2(p_i). Max entropy for N uniform outcomes = log2(N).
+export interface EntropyResult {
+  entropy: number;
+  maxEntropy: number;
+  normalizedEntropy: number; // 0..1 (1 = perfectly uniform)
+  interpretation: string;
+}
+
+export function computeEntropy(game: GameId = "powerball"): EntropyResult {
+  const freq = computeFrequency(game);
+  const totalCount = freq.reduce((s, f) => s + f.count, 0);
+  let entropy = 0;
+  if (totalCount > 0) {
+    for (const f of freq) {
+      if (f.count > 0) {
+        const p = f.count / totalCount;
+        entropy -= p * Math.log2(p);
+      }
+    }
+  }
+  const maxEntropy = Math.log2(freq.length || 1);
+  const normalized = maxEntropy > 0 ? entropy / maxEntropy : 0;
+  let interpretation: string;
+  if (normalized > 0.95) {
+    interpretation = "Near-maximum entropy — distribution is statistically consistent with uniform random draws (no exploitable bias).";
+  } else if (normalized > 0.85) {
+    interpretation = "High entropy with minor deviations from uniform — likely statistical noise.";
+  } else {
+    interpretation = "Reduced entropy — distribution deviates from uniform (could be bias or just small sample).";
+  }
+  return { entropy, maxEntropy, normalizedEntropy: normalized, interpretation };
+}
+
+// (6b.2) Wald-Wolfowitz runs test — tests randomness of binary sequences.
+// We test whether per-draw sums are randomly above/below the median.
+export interface RunsTestResult {
+  n: number;
+  n1: number;
+  n2: number;
+  observedRuns: number;
+  expectedRuns: number;
+  zScore: number;
+  pValue: number;
+  isRandom: boolean;
+  interpretation: string;
+}
+
+export function computeRunsTest(game: GameId = "powerball"): RunsTestResult {
+  const sums = getMainDraws(game).map(draw => draw.reduce((s, n) => s + n, 0));
+  if (sums.length < 10) {
+    return {
+      n: sums.length, n1: 0, n2: 0, observedRuns: 0, expectedRuns: 0,
+      zScore: 0, pValue: 1, isRandom: true,
+      interpretation: "Insufficient data for runs test (need ≥10 draws).",
+    };
+  }
+  const sorted = [...sums].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  const binary = sums.map(s => (s > median ? 1 : 0));
+  const n1 = binary.filter(b => b === 1).length;
+  const n2 = binary.filter(b => b === 0).length;
+  const n = n1 + n2;
+  let observedRuns = 1;
+  for (let i = 1; i < binary.length; i++) {
+    if (binary[i] !== binary[i - 1]) observedRuns++;
+  }
+  const expectedRuns = n > 0 ? (2 * n1 * n2) / n + 1 : 0;
+  const variance = n > 1 ? (2 * n1 * n2 * (2 * n1 * n2 - n)) / (n * n * (n - 1)) : 0;
+  const stdDev = Math.sqrt(variance);
+  const zScore = stdDev > 0 ? (observedRuns - expectedRuns) / stdDev : 0;
+  const pValue = 2 * (1 - normalCdf(Math.abs(zScore)));
+  const isRandom = Math.abs(zScore) < 1.96;
+  return {
+    n, n1, n2, observedRuns, expectedRuns, zScore, pValue, isRandom,
+    interpretation: isRandom
+      ? "Runs test passes — sequence of above/below-median sums is statistically random (no trend or clustering)."
+      : "Runs test fails — possible non-randomness in the sum sequence (trend or clustering detected).",
+  };
+}
+
+// (6b.3) Lag-1 autocorrelation of per-draw sums.
+// Tests whether consecutive draws are correlated (they should NOT be, if random).
+export interface AutocorrelationResult {
+  lag: number;
+  n: number;
+  autocorrelation: number;
+  criticalValue: number;
+  isSignificant: boolean;
+  interpretation: string;
+}
+
+export function computeAutocorrelation(game: GameId = "powerball", lag = 1): AutocorrelationResult {
+  const sums = getMainDraws(game).map(draw => draw.reduce((s, n) => s + n, 0));
+  const n = sums.length;
+  if (n < lag + 4) {
+    return { lag, n, autocorrelation: 0, criticalValue: 0, isSignificant: false, interpretation: "Insufficient data" };
+  }
+  const mean = sums.reduce((s, x) => s + x, 0) / n;
+  let num = 0;
+  let den = 0;
+  for (let i = 0; i < n - lag; i++) num += (sums[i] - mean) * (sums[i + lag] - mean);
+  for (let i = 0; i < n; i++) den += Math.pow(sums[i] - mean, 2);
+  const autocorr = den > 0 ? num / den : 0;
+  const critical = 1.96 / Math.sqrt(n);
+  const isSig = Math.abs(autocorr) > critical;
+  return {
+    lag, n, autocorrelation: autocorr, criticalValue: critical, isSignificant: isSig,
+    interpretation: isSig
+      ? `Significant lag-${lag} autocorrelation detected (|r| > ${critical.toFixed(3)}). Draws are NOT independent — anomaly worth investigating!`
+      : `Lag-${lag} autocorrelation within statistical noise (|r| < ${critical.toFixed(3)}). Draws are independent (as expected).`,
+  };
+}
+
+// (6b.4) Pair correlation — pairs that appear together MORE or LESS than expected.
+export interface PairCorrelationResult {
+  pair: [number, number];
+  observedCount: number;
+  expectedCount: number;
+  deviation: number;
+  zScore: number;
+  isSignificant: boolean;
+}
+
+export interface PairCorrelationSummary {
+  topOver: PairCorrelationResult[]; // pairs appearing MORE than expected
+  topUnder: PairCorrelationResult[]; // pairs appearing LESS than expected
+  totalPairsAnalyzed: number;
+  significantPairs: number;
+}
+
+export function computePairCorrelation(game: GameId = "powerball", topN = 8): PairCorrelationSummary {
+  const config = getGameConfig(game);
+  const mainDraws = getMainDraws(game);
+  const totalDraws = mainDraws.length;
+
+  const pairCounts: Record<string, number> = {};
+  for (const draw of mainDraws) {
+    for (let i = 0; i < draw.length; i++) {
+      for (let j = i + 1; j < draw.length; j++) {
+        const a = Math.min(draw[i], draw[j]);
+        const b = Math.max(draw[i], draw[j]);
+        const key = `${a}-${b}`;
+        pairCounts[key] = (pairCounts[key] || 0) + 1;
+      }
+    }
+  }
+
+  const comb7c2 = (config.mainNumbersPerDraw * (config.mainNumbersPerDraw - 1)) / 2;
+  const combNc2 = (config.mainMax * (config.mainMax - 1)) / 2;
+  const expectedPerPair = totalDraws > 0 ? (comb7c2 / combNc2) * totalDraws : 0;
+  const p = combNc2 > 0 ? comb7c2 / combNc2 : 0;
+  const variance = totalDraws * p * (1 - p);
+  const stdDev = Math.sqrt(variance);
+
+  const allPairs: PairCorrelationResult[] = [];
+  for (let a = 1; a <= config.mainMax; a++) {
+    for (let b = a + 1; b <= config.mainMax; b++) {
+      const key = `${a}-${b}`;
+      const observed = pairCounts[key] || 0;
+      const z = stdDev > 0 ? (observed - expectedPerPair) / stdDev : 0;
+      allPairs.push({
+        pair: [a, b],
+        observedCount: observed,
+        expectedCount: expectedPerPair,
+        deviation: observed - expectedPerPair,
+        zScore: z,
+        isSignificant: Math.abs(z) > 1.96,
+      });
+    }
+  }
+
+  const topOver = [...allPairs].sort((a, b) => b.zScore - a.zScore).slice(0, topN);
+  const topUnder = [...allPairs].sort((a, b) => a.zScore - b.zScore).slice(0, topN);
+  const significant = allPairs.filter(p => p.isSignificant).length;
+
+  return {
+    topOver,
+    topUnder,
+    totalPairsAnalyzed: allPairs.length,
+    significantPairs: significant,
+  };
+}
+
+// (6b.5) Hypergeometric probability — exact odds of matching k of K drawn
+// numbers when picking n from a pool of N.
+export interface HypergeometricResult {
+  poolSize: number;
+  drawnCount: number;
+  ticketSize: number;
+  totalCombinations: number;
+  probabilityTable: { matchCount: number; probability: number; oneIn: number }[];
+  interpretation: string;
+}
+
+export function computeHypergeometricProb(game: GameId = "powerball"): HypergeometricResult {
+  const config = getGameConfig(game);
+  const N = config.mainMax;
+  const K = config.mainNumbersPerDraw;
+  const n = config.mainNumbersPerDraw;
+  const totalCombinations = combinations(N, n);
+  const probabilityTable: { matchCount: number; probability: number; oneIn: number }[] = [];
+  for (let k = 0; k <= Math.min(K, n); k++) {
+    const c1 = combinations(K, k);
+    const c2 = combinations(N - K, n - k);
+    const prob = totalCombinations > 0 ? (c1 * c2) / totalCombinations : 0;
+    probabilityTable.push({
+      matchCount: k,
+      probability: prob,
+      oneIn: prob > 0 ? 1 / prob : Infinity,
+    });
+  }
+  const allMatch = probabilityTable[Math.min(K, n)];
+  return {
+    poolSize: N,
+    drawnCount: K,
+    ticketSize: n,
+    totalCombinations,
+    probabilityTable,
+    interpretation: `Matching all ${K} drawn numbers has probability ${(allMatch.probability * 100).toExponential(2)}% (1 in ${allMatch.oneIn.toLocaleString("en-US", { maximumFractionDigits: 0 })}).`,
+  };
+}
+
+// (6b.6) Coverage analysis — what % of all possible numbers have appeared.
+export interface CoverageResult {
+  mainCoverage: number;
+  mainAppeared: number;
+  mainTotal: number;
+  secondaryCoverage: number;
+  secondaryAppeared: number;
+  secondaryTotal: number;
+  interpretation: string;
+}
+
+export function computeCoverage(game: GameId = "powerball"): CoverageResult {
+  const config = getGameConfig(game);
+  const mainFreq = computeFrequency(game);
+  const secFreq = computeSecondaryFrequency(game);
+  const mainAppeared = mainFreq.filter(f => f.count > 0).length;
+  const mainTotal = mainFreq.length;
+  const secAppeared = secFreq.filter(f => f.count > 0).length;
+  const secTotal = secFreq.length;
+  return {
+    mainCoverage: mainTotal > 0 ? mainAppeared / mainTotal : 0,
+    mainAppeared,
+    mainTotal,
+    secondaryCoverage: secTotal > 0 ? secAppeared / secTotal : 0,
+    secondaryAppeared: secAppeared,
+    secondaryTotal: secTotal,
+    interpretation: `${mainAppeared}/${mainTotal} main numbers and ${secAppeared}/${secTotal} ${config.hasPowerball ? "Powerball" : "supplementary"} numbers have appeared at least once.`,
+  };
+}
+
+// (6b.7) Skewness & kurtosis of the frequency distribution.
+// Tests for asymmetry (skewness) and tailedness (kurtosis) in the distribution.
+export interface DistributionShapeResult {
+  mean: number;
+  variance: number;
+  stdDev: number;
+  skewness: number;
+  kurtosis: number; // excess kurtosis (0 = normal)
+  skewInterpretation: string;
+  kurtosisInterpretation: string;
+}
+
+export function computeDistributionShape(game: GameId = "powerball"): DistributionShapeResult {
+  const freq = computeFrequency(game);
+  const counts = freq.map(f => f.count);
+  const n = counts.length;
+  if (n < 3) {
+    return {
+      mean: 0, variance: 0, stdDev: 0, skewness: 0, kurtosis: 0,
+      skewInterpretation: "Insufficient data",
+      kurtosisInterpretation: "Insufficient data",
+    };
+  }
+  const mean = counts.reduce((s, x) => s + x, 0) / n;
+  const variance = counts.reduce((s, x) => s + Math.pow(x - mean, 2), 0) / n;
+  const stdDev = Math.sqrt(variance);
+  const skewness = stdDev > 0
+    ? counts.reduce((s, x) => s + Math.pow((x - mean) / stdDev, 3), 0) / n
+    : 0;
+  const kurtosis = stdDev > 0
+    ? counts.reduce((s, x) => s + Math.pow((x - mean) / stdDev, 4), 0) / n - 3
+    : 0;
+  const skewInterp = Math.abs(skewness) < 0.5
+    ? "Approximately symmetric (skewness near 0) — consistent with uniform random."
+    : skewness > 0
+    ? "Right-skewed (long tail of high-frequency numbers) — slight anomaly."
+    : "Left-skewed (long tail of low-frequency numbers) — slight anomaly.";
+  const kurtInterp = Math.abs(kurtosis) < 0.5
+    ? "Near-normal tailedness (excess kurtosis near 0) — consistent with uniform random."
+    : kurtosis > 0
+    ? "Leptokurtic (heavier tails than normal) — more outliers than expected."
+    : "Platykurtic (lighter tails than normal) — fewer outliers than expected.";
+  return {
+    mean, variance, stdDev, skewness, kurtosis,
+    skewInterpretation: skewInterp,
+    kurtosisInterpretation: kurtInterp,
+  };
+}
+
+// (6b.8) Coupon collector's problem — expected number of draws to see all N
+// numbers at least once. E[T] = N × H_N where H_N is the Nth harmonic number.
+export interface CouponCollectorResult {
+  poolSize: number;
+  drawnPerDraw: number;
+  expectedDrawsToSeeAll: number;
+  harmonicNumber: number;
+  drawsObserved: number;
+  coverageSoFar: number;
+  interpretation: string;
+}
+
+export function computeCouponCollector(game: GameId = "powerball"): CouponCollectorResult {
+  const config = getGameConfig(game);
+  const N = config.mainMax;
+  const m = config.mainNumbersPerDraw;
+  // For drawing m balls from N per draw, expected draws to see all N:
+  // E[T] = (N/m) × H_N where H_N = Σ 1/i for i=1..N
+  let harmonic = 0;
+  for (let i = 1; i <= N; i++) harmonic += 1 / i;
+  const expectedDraws = (N / m) * harmonic;
+  const observed = getDraws(game).length;
+  const coverage = computeCoverage(game);
+  const pct = (observed / expectedDraws) * 100;
+  return {
+    poolSize: N,
+    drawnPerDraw: m,
+    expectedDrawsToSeeAll: expectedDraws,
+    harmonicNumber: harmonic,
+    drawsObserved: observed,
+    coverageSoFar: coverage.mainCoverage,
+    interpretation: `Expected ~${expectedDraws.toFixed(0)} draws to see all ${N} numbers. Observed ${observed} draws (${pct.toFixed(1)}% of expected) — coverage at ${(coverage.mainCoverage * 100).toFixed(1)}%.`,
+  };
+}
+
+// (6b.9) Birthday problem — probability of shared numbers between two draws.
+// For two draws of m balls each from a pool of N, the probability they share
+// at least one number is 1 - C(N-m, m) / C(N, m).
+export interface BirthdayProblemResult {
+  probabilityOfSharedNumber: number;
+  expectedSharedNumbers: number;
+  interpretation: string;
+}
+
+export function computeBirthdayProblem(game: GameId = "powerball"): BirthdayProblemResult {
+  const config = getGameConfig(game);
+  const N = config.mainMax;
+  const m = config.mainNumbersPerDraw;
+  // P(at least one shared) = 1 - C(N-m, m) / C(N, m)
+  const total = combinations(N, m);
+  const disjoint = combinations(N - m, m);
+  const prob = total > 0 ? 1 - disjoint / total : 0;
+  // Expected number of shared = m² / N (linearity of expectation)
+  const expectedShared = (m * m) / N;
+  return {
+    probabilityOfSharedNumber: prob,
+    expectedSharedNumbers: expectedShared,
+    interpretation: `Two random draws share at least one number with probability ${(prob * 100).toFixed(1)}% (≈1 in ${prob > 0 ? (1 / prob).toFixed(1) : "∞"}). Expected shared count per pair of draws: ${expectedShared.toFixed(2)} numbers.`,
+  };
+}
+
+// -----------------------------------------------------------------------------
 // 7. MARKOV TRANSITION — MAIN only
 // -----------------------------------------------------------------------------
 export interface MarkovResult {
