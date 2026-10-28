@@ -26,6 +26,7 @@ import {
   computeChiSquare,
   computeSecondaryChiSquare,
   computePredictions,
+  computeMethodPredictions,
   computeAggregate,
   computeOddEven,
   computeHighLow,
@@ -110,6 +111,12 @@ export default function Home() {
 
   const predictions = useMemo(
     () => computePredictions(game, predictionSeed || undefined),
+    [game, predictionSeed, drawsVersion]
+  );
+
+  // Per-method predictions — one set per individual statistical method
+  const methodPredictions = useMemo(
+    () => computeMethodPredictions(game, predictionSeed || undefined),
     [game, predictionSeed, drawsVersion]
   );
 
@@ -438,6 +445,56 @@ export default function Home() {
             </div>
 
             <Disclaimer game={game} />
+          </section>
+
+          {/* PER-METHOD PREDICTIONS — one set per statistical method */}
+          <section>
+            <SectionHeader
+              title={`Per-Method Predictions — ${config.label}`}
+              subtitle="Each card uses a single statistical method to generate a candidate pick. Try them separately to see which approach you trust."
+              badge={`${methodPredictions.length} METHODS`}
+            />
+            <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3 mt-5">
+              {methodPredictions.map((m) => {
+                const secNumbers = config.hasPowerball
+                  ? (m.powerball != null ? [m.powerball] : [])
+                  : (m.supplementaryNumbers ?? []);
+                return (
+                  <div
+                    key={m.id}
+                    className="rounded-lg border border-slate-700/60 bg-slate-950/40 p-4 hover:border-cyan-500/40 transition-colors"
+                  >
+                    <div className="flex items-baseline justify-between mb-1.5">
+                      <h3 className="text-sm font-semibold text-white">{m.methodName}</h3>
+                      <span className="text-[9px] uppercase tracking-wider text-slate-400 font-mono">
+                        {m.methodTag}
+                      </span>
+                    </div>
+                    <p className="text-[10px] text-slate-400 leading-relaxed mb-3 min-h-[2rem]">
+                      {m.rationale}
+                    </p>
+                    <div className="border-t border-slate-700/40 pt-2.5">
+                      <div className="text-[9px] font-mono uppercase tracking-wider text-slate-500 mb-1.5">
+                        Main ({config.mainNumbersPerDraw})
+                      </div>
+                      <div className="flex flex-wrap gap-1 justify-center">
+                        {m.mainNumbers.map((n, i) => (
+                          <NumberBall key={i} value={n} size="sm" variant="prediction" />
+                        ))}
+                      </div>
+                      <div className={`text-[9px] font-mono uppercase tracking-wider mt-2 mb-1.5 ${config.hasPowerball ? "text-rose-400" : "text-amber-400"}`}>
+                        {secLabel}{config.hasPowerball ? "" : ` (${secCountPerDraw})`}
+                      </div>
+                      <div className="flex flex-wrap gap-1 justify-center">
+                        {secNumbers.map((n, i) => (
+                          <NumberBall key={i} value={n} size="sm" variant="powerball_pred" />
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
           </section>
 
           {/* FREQUENCY HEATMAPS */}

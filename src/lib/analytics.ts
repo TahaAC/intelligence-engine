@@ -1233,7 +1233,270 @@ export function computePredictions(game: GameId = "powerball", seed?: number): S
 }
 
 // -----------------------------------------------------------------------------
-// AGGREGATE STATS
+// 11. PER-METHOD PREDICTIONS — generate number picks from EACH statistical method individually
+// -----------------------------------------------------------------------------
+// Each method gets its own prediction: 7 main + 1 PB (Powerball) OR
+// 7 main + 3 supp (Oz Lotto) OR 6 main + 2 supp (Saturday Lotto).
+// Lets the user try picks derived from each method separately.
+
+export interface MethodPrediction {
+  id: string;
+  methodName: string;
+  methodTag: string;
+  rationale: string;
+  mainNumbers: number[];
+  powerball?: number;
+  supplementaryNumbers?: number[];
+}
+
+export function computeMethodPredictions(game: GameId = "powerball", seed?: number): MethodPrediction[] {
+  const config = getGameConfig(game);
+  const freq = computeFrequency(game);
+  const gaps = computeGaps(game);
+  const markov = computeMarkov(game);
+  const gapDist = computeGapDistribution(game);
+  const freqCI = computeFrequencyWithCI(game);
+  const bayes = computeBayes(game);
+  const secFreq = computeSecondaryFrequency(game);
+  const secGaps = computeSecondaryGaps(game);
+  const pairCorr = computePairCorrelation(game, 5);
+  const pickCount = config.mainNumbersPerDraw;
+  const secCount = config.hasPowerball ? 1 : config.supplementaryCount;
+
+  const baseSeed = seed ?? 0;
+  const r = (offset: number, fallback: number) => baseSeed === 0 ? fallback : baseSeed + offset;
+
+  const predictions: MethodPrediction[] = [];
+
+  // Helper to pick top N by some metric
+  const topN = <T>(arr: T[], scoreFn: (x: T) => number, n: number, asc = false): T[] => {
+    const sorted = [...arr].sort((a, b) => asc ? scoreFn(a) - scoreFn(b) : scoreFn(b) - scoreFn(a));
+    return sorted.slice(0, n);
+  };
+
+  // Helper to extract just the number from a FrequencyRecord
+  const pickMainNumbers = (records: { number: number }[]): number[] =>
+    records.map(r => r.number).sort((a, b) => a - b);
+
+  // Method 1: Pure Top Hot — 7 most frequent main numbers
+  predictions.push({
+    id: "pure-hot",
+    methodName: "Pure Top Hot",
+    methodTag: "Top 7 by frequency",
+    rationale: "Simply the 7 numbers that have appeared most often in historical draws. Assumes any positive bias persists.",
+    mainNumbers: pickMainNumbers(topN(freq, f => f.count, pickCount)),
+    ...(config.hasPowerball
+      ? { powerball: topN(secFreq, f => f.count, 1)[0].number }
+      : { supplementaryNumbers: topN(secFreq, f => f.count, secCount).map(r => r.number).sort((a,b)=>a-b) }),
+  });
+
+  // Method 2: Pure Top Cold — 7 least frequent main numbers
+  predictions.push({
+    id: "pure-cold",
+    methodName: "Pure Top Cold",
+    methodTag: "Bottom 7 by frequency",
+    rationale: "The 7 numbers that have appeared least often. Gambler's fallacy intuition: 'cold' numbers are 'due'.",
+    mainNumbers: pickMainNumbers(topN(freq, f => f.count, pickCount, true)),
+    ...(config.hasPowerball
+      ? { powerball: topN(secFreq, f => f.count, 1, true)[0].number }
+      : { supplementaryNumbers: topN(secFreq, f => f.count, secCount, true).map(r => r.number).sort((a,b)=>a-b) }),
+  });
+
+  // Method 3: Most Overdue — top 7 by dueScore
+  predictions.push({
+    id: "most-overdue",
+    methodName: "Most Overdue",
+    methodTag: "Top 7 by due index",
+    rationale: "Numbers whose current dry spell most exceeds their historical mean gap. Largest currentGap / averageGap ratio.",
+    mainNumbers: pickMainNumbers(topN(gaps, g => g.dueScore, pickCount)),
+    ...(config.hasPowerball
+      ? { powerball: topN(secGaps, g => g.dueScore, 1)[0].number }
+      : { supplementaryNumbers: topN(secGaps, g => g.dueScore, secCount).map(r => r.number).sort((a,b)=>a-b) }),
+  });
+
+  // Method 4: K-S Top Consistent — numbers with lowest K-S statistic (most random)
+  predictions.push({
+    id: "ks-consistent",
+    methodName: "K-S Most Random",
+    methodTag: "Lowest K-S D statistic",
+    rationale: "Numbers whose gap distribution most closely matches the theoretical geometric distribution. Numbers behaving most 'randomly'.",
+    mainNumbers: pickMainNumbers(topN(gapDist.filter(g => g.gapCount >= 5), g => -g.ksStatistic, pickCount).map(g => ({ number: g.number }))),
+    ...(config.hasPowerball
+      ? { powerball: topN(secFreq, f => f.count, 1)[0].number }
+      : { supplementaryNumbers: topN(secFreq, f => f.count, secCount).map(r => r.number).sort((a,b)=>a-b) }),
+  });
+
+  // Method 5: K-S Top Anomalous — numbers with highest K-S statistic
+  predictions.push({
+    id: "ks-anomalous",
+    methodName: "K-S Most Anomalous",
+    methodTag: "Highest K-S D statistic",
+    rationale: "Numbers whose gap distribution most deviates from geometric. Potentially biased (though likely statistical noise).",
+    mainNumbers: pickMainNumbers(topN(gapDist.filter(g => g.gapCount >= 5), g => g.ksStatistic, pickCount).map(g => ({ number: g.number }))),
+    ...(config.hasPowerball
+      ? { powerball: topN(secGaps, g => g.dueScore, 1)[0].number }
+      : { supplementaryNumbers: topN(secGaps, g => g.dueScore, secCount).map(r => r.number).sort((a,b)=>a-b) }),
+  });
+
+  // Method 6: CI High Outliers — numbers above upper CI bound
+  const highOutliers = freqCI.filter(f => f.isOutlier && f.count > f.expectedCount);
+  if (highOutliers.length >= pickCount) {
+    predictions.push({
+      id: "ci-high",
+      methodName: "CI High Outliers",
+      methodTag: "Above 95% CI",
+      rationale: "Numbers whose observed count exceeds the upper 95% confidence band — statistically significant high-frequency outliers.",
+      mainNumbers: pickMainNumbers(topN(highOutliers, f => f.zScore, pickCount)),
+      ...(config.hasPowerball
+        ? { powerball: topN(secFreq, f => f.count, 1)[0].number }
+        : { supplementaryNumbers: topN(secFreq, f => f.count, secCount).map(r => r.number).sort((a,b)=>a-b) }),
+    });
+  }
+
+  // Method 7: CI Low Outliers — numbers below lower CI bound
+  const lowOutliers = freqCI.filter(f => f.isOutlier && f.count < f.expectedCount);
+  if (lowOutliers.length >= pickCount) {
+    predictions.push({
+      id: "ci-low",
+      methodName: "CI Low Outliers",
+      methodTag: "Below 95% CI",
+      rationale: "Numbers whose observed count is below the lower 95% confidence band — statistically significant low-frequency outliers (possibly 'due').",
+      mainNumbers: pickMainNumbers(topN(lowOutliers, f => -f.zScore, pickCount)),
+      ...(config.hasPowerball
+        ? { powerball: topN(secGaps, g => g.dueScore, 1)[0].number }
+        : { supplementaryNumbers: topN(secGaps, g => g.dueScore, secCount).map(r => r.number).sort((a,b)=>a-b) }),
+    });
+  }
+
+  // Method 8: Bayesian Top Posterior — top 7 by posterior mean
+  predictions.push({
+    id: "bayesian-top",
+    methodName: "Bayesian Top Posterior",
+    methodTag: "Highest P(θ)",
+    rationale: "Numbers with the highest posterior mean probability after Beta-Binomial update. Most likely true-high-frequency numbers.",
+    mainNumbers: pickMainNumbers(topN(bayes, b => b.posteriorMean, pickCount)),
+    ...(config.hasPowerball
+      ? { powerball: topN(secFreq, f => f.count, 1)[0].number }
+      : { supplementaryNumbers: topN(secFreq, f => f.count, secCount).map(r => r.number).sort((a,b)=>a-b) }),
+  });
+
+  // Method 9: Markov Next-Likely — top 7 by Markov co-occurrence
+  predictions.push({
+    id: "markov-next",
+    methodName: "Markov Next-Likely",
+    methodTag: "Highest co-occurrence",
+    rationale: "Numbers with the highest aggregated conditional co-occurrence probability given the latest draw's main numbers.",
+    mainNumbers: pickMainNumbers(topN(markov.candidates, c => c.score, pickCount).map(c => ({ number: c.number }))),
+    ...(config.hasPowerball
+      ? { powerball: topN(secFreq, f => f.count, 1)[0].number }
+      : { supplementaryNumbers: topN(secFreq, f => f.count, secCount).map(r => r.number).sort((a,b)=>a-b) }),
+  });
+
+  // Method 10: Pair Correlation Over — include top co-occurring pairs
+  // Take the top co-occurring pairs and merge their numbers into a set of 7
+  const overPairs = pairCorr.topOver.slice(0, 3);
+  const overNumbers = new Set<number>();
+  overPairs.forEach(p => { overNumbers.add(p.pair[0]); overNumbers.add(p.pair[1]); });
+  // If we have fewer than 7, fill with top frequency
+  if (overNumbers.size < pickCount) {
+    for (const f of [...freq].sort((a, b) => b.count - a.count)) {
+      if (overNumbers.size >= pickCount) break;
+      overNumbers.add(f.number);
+    }
+  }
+  predictions.push({
+    id: "pair-over",
+    methodName: "Pair Correlation Over",
+    methodTag: "Co-occurring pairs",
+    rationale: "Includes the top 3 pairs of numbers that appear together more often than expected by chance. Fills remaining slots with hot numbers.",
+    mainNumbers: [...overNumbers].sort((a, b) => a - b).slice(0, pickCount),
+    ...(config.hasPowerball
+      ? { powerball: topN(secFreq, f => f.count, 1)[0].number }
+      : { supplementaryNumbers: topN(secFreq, f => f.count, secCount).map(r => r.number).sort((a,b)=>a-b) }),
+  });
+
+  // Method 11: Pair Correlation Under — avoid under-occurring pairs
+  // Pick top frequency numbers, but exclude any number from top under-pairs
+  const underPairNumbers = new Set<number>();
+  pairCorr.topUnder.slice(0, 3).forEach(p => { underPairNumbers.add(p.pair[0]); underPairNumbers.add(p.pair[1]); });
+  const candidates = freq.filter(f => !underPairNumbers.has(f.number));
+  const safePool = candidates.length >= pickCount ? candidates : freq;
+  predictions.push({
+    id: "pair-under-avoid",
+    methodName: "Avoid Under-Pairs",
+    methodTag: "Exclude low-co-occurrence",
+    rationale: "Picks hot numbers but excludes any number from the top 3 pairs that appear together LESS than expected by chance.",
+    mainNumbers: pickMainNumbers(topN(safePool, f => f.count, pickCount)),
+    ...(config.hasPowerball
+      ? { powerball: topN(secFreq, f => f.count, 1)[0].number }
+      : { supplementaryNumbers: topN(secFreq, f => f.count, secCount).map(r => r.number).sort((a,b)=>a-b) }),
+  });
+
+  // Method 12: Coverage Seekers — numbers that have appeared 0 times (still missing)
+  const zeroCount = freq.filter(f => f.count === 0);
+  if (zeroCount.length >= pickCount) {
+    predictions.push({
+      id: "coverage-seekers",
+      methodName: "Coverage Seekers",
+      methodTag: "Numbers with 0 appearances",
+      rationale: "Numbers that have never appeared in the historical data. Theoretically impossible to be 'due' but covers the long tail.",
+      mainNumbers: pickMainNumbers(zeroCount.slice(0, pickCount)),
+      ...(config.hasPowerball
+        ? { powerball: topN(secGaps, g => g.dueScore, 1)[0].number }
+        : { supplementaryNumbers: topN(secGaps, g => g.dueScore, secCount).map(r => r.number).sort((a,b)=>a-b) }),
+    });
+  }
+
+  // Method 13: Balanced Sum Convergence — Monte Carlo optimizing expected sum + balance
+  // (Reuses logic from Statistical Norm strategy)
+  const expectedSum = (pickCount * (config.mainMax + 1)) / 2;
+  const rng = mulberry32(r(505, 20261022));
+  let bestSet: number[] = [];
+  let bestScore = -Infinity;
+  for (let trial = 0; trial < 20_000; trial++) {
+    const cand: number[] = [];
+    while (cand.length < pickCount) {
+      const n = 1 + Math.floor(rng() * config.mainMax);
+      if (!cand.includes(n)) cand.push(n);
+    }
+    cand.sort((a, b) => a - b);
+    const sum = cand.reduce((s, x) => s + x, 0);
+    const oddCount = cand.filter(n => n % 2 === 1).length;
+    const lowCount = cand.filter(n => n <= Math.floor(config.mainMax / 2)).length;
+    const sumScore = -Math.abs(sum - expectedSum) / 10;
+    const balanceScore = -Math.abs(oddCount - pickCount / 2) - Math.abs(lowCount - pickCount / 2);
+    const score = sumScore + balanceScore + rng() * 0.01;
+    if (score > bestScore) { bestScore = score; bestSet = cand; }
+  }
+  predictions.push({
+    id: "sum-balanced",
+    methodName: "Sum-Balanced",
+    methodTag: "Converge on expected sum",
+    rationale: `Monte-Carlo pick (20k trials) optimizing closeness to theoretical expected sum (${expectedSum.toFixed(0)}) + balanced odd/even and high/low.`,
+    mainNumbers: bestSet,
+    ...(config.hasPowerball
+      ? { powerball: topN(secFreq, f => f.count, 1)[0].number }
+      : { supplementaryNumbers: topN(secFreq, f => f.count, secCount).map(r => r.number).sort((a,b)=>a-b) }),
+  });
+
+  // Method 14: Mid-range picks (numbers near the median — middle of the range)
+  const midPoint = Math.floor(config.mainMax / 2);
+  const midRange = freq.filter(f => Math.abs(f.number - midPoint) <= Math.floor(config.mainMax / 4));
+  predictions.push({
+    id: "mid-range",
+    methodName: "Mid-Range Picks",
+    methodTag: "Near middle of range",
+    rationale: `Numbers clustered around the middle of the 1-${config.mainMax} range (within ±${Math.floor(config.mainMax / 4)} of ${midPoint}). Bet on regression to the mean.`,
+    mainNumbers: pickMainNumbers(topN(midRange, f => f.count, pickCount)),
+    ...(config.hasPowerball
+      ? { powerball: Math.round(config.powerballMax / 2) }
+      : { supplementaryNumbers: topN(secFreq, f => f.count, secCount).map(r => r.number).sort((a,b)=>a-b) }),
+  });
+
+  return predictions;
+}
+
+
 // -----------------------------------------------------------------------------
 export interface AggregateStats {
   totalDraws: number;
