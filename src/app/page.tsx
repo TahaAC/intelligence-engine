@@ -27,6 +27,7 @@ import {
   computeSecondaryChiSquare,
   computePredictions,
   computeMethodPredictions,
+  computeRecommendedPick,
   computeAggregate,
   computeOddEven,
   computeHighLow,
@@ -119,6 +120,12 @@ export default function Home() {
   const methodPredictions = useMemo(
     () => computeMethodPredictions(game, predictionSeed || undefined),
     [game, predictionSeed, drawsVersion]
+  );
+
+  // Recommended best pick — consensus across ALL methods
+  const recommendedPick = useMemo(
+    () => computeRecommendedPick(game),
+    [game, drawsVersion]
   );
 
   // Saved picks (localStorage-backed)
@@ -1377,6 +1384,110 @@ export default function Home() {
             <div className="mt-5">
               <DrawHistoryTable draws={currentDraws} game={game} />
             </div>
+          </section>
+
+          {/* RECOMMENDED BEST PICK — top consensus across ALL methods */}
+          <section>
+            <SectionHeader
+              title={`★ Recommended Best Pick — ${config.label}`}
+              subtitle="The single best pick based on consensus across ALL 19 statistical methods. Numbers shown below appeared in the most method outputs."
+              badge="TOP CONSENSUS"
+            />
+            <Card className="mt-5 bg-gradient-to-br from-amber-950/30 via-slate-950/60 to-cyan-950/30 border-amber-500/50 shadow-[0_0_30px_rgba(251,191,36,0.15)]">
+              <CardContent className="pt-6 pb-6">
+                <div className="flex flex-col lg:flex-row gap-6 items-center">
+                  {/* Left: rationale */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 mb-3">
+                      <div className="text-2xl">★</div>
+                      <h3 className="text-lg font-bold text-amber-300 font-mono tracking-wide">
+                        Top Consensus Pick
+                      </h3>
+                    </div>
+                    <p className="text-xs text-slate-300/90 leading-relaxed mb-3">
+                      {recommendedPick.rationale}
+                    </p>
+                    <p className="text-xs text-slate-400 leading-relaxed mb-4">
+                      {recommendedPick.secondaryRationale}
+                    </p>
+                    <button
+                      onClick={() => savePick({
+                        game,
+                        label: "★ Top Consensus Pick",
+                        source: "recommended",
+                        mainNumbers: recommendedPick.mainNumbers,
+                        powerball: recommendedPick.powerball ?? null,
+                        supplementaryNumbers: recommendedPick.supplementaryNumbers ?? null,
+                      })}
+                      className="px-4 py-2 rounded-lg border border-amber-500/60 bg-amber-500/15 text-amber-200 font-mono text-xs font-semibold hover:bg-amber-500/25 hover:text-white transition-all flex items-center gap-2"
+                    >
+                      <span className="text-base">💾</span>
+                      Save this pick
+                    </button>
+                  </div>
+
+                  {/* Right: numbers */}
+                  <div className="flex flex-col items-center gap-4 lg:border-l lg:border-slate-700/50 lg:pl-6">
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
+                      Main numbers ({config.mainNumbersPerDraw})
+                    </div>
+                    <div className="flex flex-wrap justify-center gap-2 max-w-md">
+                      {recommendedPick.mainNumbers.map((n, i) => (
+                        <NumberBall key={i} value={n} size="xl" variant="prediction" />
+                      ))}
+                    </div>
+                    <div className={`text-[10px] font-mono uppercase tracking-wider mt-2 ${config.hasPowerball ? "text-rose-400" : "text-amber-400"}`}>
+                      {secLabel}{config.hasPowerball ? "" : ` (${secCountPerDraw})`}
+                    </div>
+                    <div className="flex flex-wrap justify-center gap-2">
+                      {config.hasPowerball ? (
+                        <NumberBall value={recommendedPick.powerball ?? 0} size="xl" variant="powerball_pred" />
+                      ) : (
+                        (recommendedPick.supplementaryNumbers ?? []).map((n, i) => (
+                          <NumberBall key={i} value={n} size="lg" variant="powerball_pred" />
+                        ))
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Consensus votes table */}
+                <div className="mt-6 pt-5 border-t border-slate-700/50">
+                  <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-3">
+                    Consensus votes — top 12 numbers (of {recommendedPick.totalMethods} methods)
+                  </div>
+                  <div className="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
+                    {recommendedPick.consensusScores.map((s) => {
+                      const isInPick = recommendedPick.mainNumbers.includes(s.number);
+                      const votePct = (s.votes / recommendedPick.totalMethods) * 100;
+                      return (
+                        <div
+                          key={s.number}
+                          className={`text-center rounded p-2 border ${
+                            isInPick
+                              ? "bg-amber-500/15 border-amber-500/50"
+                              : "bg-slate-900/40 border-slate-700/40"
+                          }`}
+                        >
+                          <div className={`text-sm font-mono font-bold ${isInPick ? "text-amber-300" : "text-slate-300"}`}>
+                            {s.number.toString().padStart(2, "0")}
+                          </div>
+                          <div className="text-[9px] font-mono text-slate-400 mt-0.5">
+                            {s.votes}/{recommendedPick.totalMethods}
+                          </div>
+                          <div className="h-1 bg-slate-800 rounded mt-1 overflow-hidden">
+                            <div
+                              className={`h-full ${isInPick ? "bg-amber-500" : "bg-cyan-500/60"}`}
+                              style={{ width: `${votePct}%` }}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </section>
 
           {/* SAVED PICKS TRACKER */}

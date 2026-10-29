@@ -1496,6 +1496,110 @@ export function computeMethodPredictions(game: GameId = "powerball", seed?: numb
   return predictions;
 }
 
+// -----------------------------------------------------------------------------
+// 12. RECOMMENDED BEST PICK — consensus across ALL methods
+// -----------------------------------------------------------------------------
+// Surfaces the numbers that multiple independent statistical methods agree on.
+// For each main number 1..N, count how many of the 19 methods (5 ensemble +
+// 14 per-method) picked it. Top 7 by consensus score becomes the recommended pick.
+// For the secondary, picks the most-frequently-appeared secondary across all methods.
+
+export interface RecommendedPick {
+  mainNumbers: number[];                  // 7 (or 6) recommended main numbers
+  powerball?: number;                     // for powerball
+  supplementaryNumbers?: number[];        // for oz-lotto / saturday-lotto / set-for-life
+  consensusScores: { number: number; votes: number }[];  // vote count per number (top 12)
+  totalMethods: number;
+  rationale: string;
+  secondaryRationale: string;
+}
+
+export function computeRecommendedPick(game: GameId = "powerball"): RecommendedPick {
+  const config = getGameConfig(game);
+  const ensemble = computePredictions(game);
+  const methods = computeMethodPredictions(game);
+  const allPicks = [...ensemble, ...methods];
+  const totalMethods = allPicks.length;
+
+  // Count votes for each main number
+  const mainVotes = new Array<number>(config.mainMax + 1).fill(0);
+  for (const p of allPicks) {
+    for (const n of p.mainNumbers) {
+      if (n >= 1 && n <= config.mainMax) mainVotes[n]++;
+    }
+  }
+
+  // Rank numbers by votes (descending). Ties broken by frequency (hot numbers
+  // win ties — slight empirical tilt in case of consensus deadlock).
+  const freq = computeFrequency(game);
+  const ranked = Array.from({ length: config.mainMax }, (_, i) => i + 1)
+    .map((n) => ({ number: n, votes: mainVotes[n], freq: freq[n - 1].count }))
+    .sort((a, b) => {
+      if (b.votes !== a.votes) return b.votes - a.votes;
+      return b.freq - a.freq;
+    });
+
+  const mainNumbers = ranked.slice(0, config.mainNumbersPerDraw).map((r) => r.number).sort((a, b) => a - b);
+  const consensusScores = ranked.slice(0, 12).map((r) => ({ number: r.number, votes: r.votes }));
+
+  // For secondary: count votes across all methods
+  const secMax = config.hasPowerball ? config.powerballMax : config.supplementaryMax;
+  const secVotes = new Array<number>(secMax + 1).fill(0);
+  for (const p of allPicks) {
+    if (config.hasPowerball) {
+      if (p.powerball != null && p.powerball >= 1 && p.powerball <= secMax) {
+        secVotes[p.powerball]++;
+      }
+    } else if (Array.isArray(p.supplementaryNumbers)) {
+      for (const n of p.supplementaryNumbers) {
+        if (n >= 1 && n <= secMax) secVotes[n]++;
+      }
+    }
+  }
+
+  let powerball: number | undefined;
+  let supplementaryNumbers: number[] | undefined;
+  let secondaryRationale: string;
+
+  if (config.hasPowerball) {
+    // Pick the PB with the most votes
+    let bestPb = 1;
+    let bestVotes = -1;
+    for (let n = 1; n <= secMax; n++) {
+      if (secVotes[n] > bestVotes) {
+        bestVotes = secVotes[n];
+        bestPb = n;
+      }
+    }
+    powerball = bestPb;
+    secondaryRationale = `Powerball ${bestPb} was picked by ${bestVotes} of ${totalMethods} methods — highest consensus.`;
+  } else {
+    // Pick top N supplementary numbers by votes
+    const secRanked = Array.from({ length: secMax }, (_, i) => i + 1)
+      .map((n) => ({ number: n, votes: secVotes[n] }))
+      .sort((a, b) => b.votes - a.votes);
+    supplementaryNumbers = secRanked
+      .slice(0, config.supplementaryCount)
+      .map((r) => r.number)
+      .sort((a, b) => a - b);
+    const topVote = secRanked[0]?.votes ?? 0;
+    secondaryRationale = `Top ${config.supplementaryCount} supplementaries by consensus vote count (top received ${topVote} of ${totalMethods} votes).`;
+  }
+
+  const topMainVotes = consensusScores[0]?.votes ?? 0;
+  const rationale = `Numbers below are the consensus winners across all ${totalMethods} statistical methods (5 ensemble strategies + 14 per-method predictions). Each number was voted on by every method — the top ${config.mainNumbersPerDraw} by vote count are shown. Top number received ${topMainVotes}/${totalMethods} votes. This is the most defensible single pick because it aggregates multiple independent mathematical perspectives, reducing reliance on any one method's quirks.`;
+
+  return {
+    mainNumbers,
+    powerball,
+    supplementaryNumbers,
+    consensusScores,
+    totalMethods,
+    rationale,
+    secondaryRationale,
+  };
+}
+
 
 // -----------------------------------------------------------------------------
 export interface AggregateStats {
