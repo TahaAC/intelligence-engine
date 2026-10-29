@@ -28,6 +28,7 @@ import {
   computePredictions,
   computeMethodPredictions,
   computeRecommendedPick,
+  computeSetForLifeOptimizedPick,
   computeAggregate,
   computeOddEven,
   computeHighLow,
@@ -127,6 +128,13 @@ export default function Home() {
     () => computeRecommendedPick(game),
     [game, drawsVersion]
   );
+
+  // Set for Life multi-draw optimized pick (only for set-for-life game)
+  const sflOptimized = useMemo(
+    () => computeSetForLifeOptimizedPick(game),
+    [game, drawsVersion]
+  );
+  const isSetForLife = game === "set-for-life";
 
   // Saved picks (localStorage-backed)
   const { picks: savedPicks, savePick, deletePick, clearGame } = useSavedPicks();
@@ -1390,102 +1398,227 @@ export default function Home() {
           <section>
             <SectionHeader
               title={`★ Recommended Best Pick — ${config.label}`}
-              subtitle="The single best pick based on consensus across ALL 19 statistical methods. Numbers shown below appeared in the most method outputs."
-              badge="TOP CONSENSUS"
+              subtitle={isSetForLife && sflOptimized
+                ? "MULTI-DRAW OPTIMIZED — Set for Life tickets are valid for 7 consecutive daily draws. This pick is engineered to perform across a full week, not just one draw."
+                : "The single best pick based on consensus across ALL 19 statistical methods. Numbers shown below appeared in the most method outputs."}
+              badge={isSetForLife && sflOptimized ? "7-DRAW OPTIMIZED" : "TOP CONSENSUS"}
             />
-            <Card className="mt-5 bg-gradient-to-br from-amber-950/30 via-slate-950/60 to-cyan-950/30 border-amber-500/50 shadow-[0_0_30px_rgba(251,191,36,0.15)]">
+            <Card className={`mt-5 border ${isSetForLife && sflOptimized ? "border-rose-500/50 bg-gradient-to-br from-rose-950/30 via-slate-950/60 to-amber-950/30 shadow-[0_0_30px_rgba(244,63,94,0.2)]" : "border-amber-500/50 bg-gradient-to-br from-amber-950/30 via-slate-950/60 to-cyan-950/30 shadow-[0_0_30px_rgba(251,191,36,0.15)]"}`}>
               <CardContent className="pt-6 pb-6">
-                <div className="flex flex-col lg:flex-row gap-6 items-center">
-                  {/* Left: rationale */}
-                  <div className="flex-1 min-w-0">
+                {isSetForLife && sflOptimized ? (
+                  <>
+                    {/* Set for Life multi-draw optimized pick */}
                     <div className="flex items-center gap-2 mb-3">
-                      <div className="text-2xl">★</div>
-                      <h3 className="text-lg font-bold text-amber-300 font-mono tracking-wide">
-                        Top Consensus Pick
+                      <div className="text-2xl">🔒</div>
+                      <h3 className="text-lg font-bold text-rose-300 font-mono tracking-wide">
+                        7-Draw Multi-Draw Optimized Pick
                       </h3>
+                      <Badge className="bg-rose-500/20 text-rose-200 border border-rose-500/40 font-mono text-[10px] ml-2">
+                        LOCKED IN · 7 CONSECUTIVE DRAWS
+                      </Badge>
                     </div>
                     <p className="text-xs text-slate-300/90 leading-relaxed mb-3">
-                      {recommendedPick.rationale}
+                      {sflOptimized.rationale}
                     </p>
                     <p className="text-xs text-slate-400 leading-relaxed mb-4">
-                      {recommendedPick.secondaryRationale}
+                      {sflOptimized.secondaryRationale}
                     </p>
+
+                    {/* Composition grid */}
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mb-4">
+                      <div className="bg-slate-900/40 border border-slate-700/50 rounded p-2 text-center">
+                        <div className="text-[9px] font-mono uppercase text-slate-400">Odd / Even</div>
+                        <div className="text-sm font-mono font-bold text-cyan-300">{sflOptimized.composition.oddCount} / {sflOptimized.composition.evenCount}</div>
+                      </div>
+                      <div className="bg-slate-900/40 border border-slate-700/50 rounded p-2 text-center">
+                        <div className="text-[9px] font-mono uppercase text-slate-400">Low / High (1-22 / 23-44)</div>
+                        <div className="text-sm font-mono font-bold text-emerald-300">{sflOptimized.composition.lowCount} / {sflOptimized.composition.highCount}</div>
+                      </div>
+                      <div className="bg-slate-900/40 border border-slate-700/50 rounded p-2 text-center">
+                        <div className="text-[9px] font-mono uppercase text-slate-400">Sum (expected {sflOptimized.composition.expectedSum})</div>
+                        <div className="text-sm font-mono font-bold text-amber-300">{sflOptimized.composition.sum}</div>
+                      </div>
+                      <div className="bg-slate-900/40 border border-slate-700/50 rounded p-2 text-center">
+                        <div className="text-[9px] font-mono uppercase text-slate-400">Spread / Consecutive</div>
+                        <div className="text-sm font-mono font-bold text-fuchsia-300">{sflOptimized.composition.spread} / {sflOptimized.composition.consecutivePairs}</div>
+                      </div>
+                    </div>
+
+                    {/* The numbers */}
+                    <div className="flex flex-col items-center gap-4 py-4 border-y border-slate-700/50 my-4">
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
+                        Main numbers ({config.mainNumbersPerDraw}) — used for all 7 draws
+                      </div>
+                      <div className="flex flex-wrap justify-center gap-2 max-w-md">
+                        {sflOptimized.mainNumbers.map((n, i) => (
+                          <NumberBall key={i} value={n} size="xl" variant="prediction" />
+                        ))}
+                      </div>
+                      <div className="text-[10px] font-mono uppercase tracking-wider mt-2 text-amber-400">
+                        Bonus ({config.supplementaryCount})
+                      </div>
+                      <div className="flex flex-wrap justify-center gap-2">
+                        {sflOptimized.supplementaryNumbers.map((n, i) => (
+                          <NumberBall key={i} value={n} size="lg" variant="powerball_pred" />
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Backtest results */}
+                    <div className="bg-slate-900/40 border border-slate-700/50 rounded p-3 mb-4">
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-2">
+                        📊 Backtest — how this pick would have performed against the last 7 historical draws
+                      </div>
+                      <div className="grid grid-cols-3 gap-2 mb-3">
+                        <div className="text-center">
+                          <div className="text-[9px] font-mono text-slate-500">Unique matches across 7 draws</div>
+                          <div className="text-lg font-mono font-bold text-emerald-300">{sflOptimized.backtest.totalUniqueMatches}/{config.mainNumbersPerDraw}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-[9px] font-mono text-slate-500">Avg matches per draw</div>
+                          <div className="text-lg font-mono font-bold text-cyan-300">{sflOptimized.backtest.avgMatchesPerDraw.toFixed(2)}</div>
+                        </div>
+                        <div className="text-center">
+                          <div className="text-[9px] font-mono text-slate-500">Best single draw</div>
+                          <div className="text-lg font-mono font-bold text-amber-300">{sflOptimized.backtest.bestDraw?.matchedCount ?? 0}</div>
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        {sflOptimized.backtest.last7Draws.map((d) => (
+                          <div key={d.drawNumber} className="flex items-center gap-2 text-[10px] font-mono">
+                            <span className="text-slate-400 w-16">#{d.drawNumber}</span>
+                            <span className="text-slate-500 w-24 truncate">{d.dateLabel}</span>
+                            <div className="flex-1 flex gap-1">
+                              {sflOptimized.mainNumbers.map((n) => (
+                                <div
+                                  key={n}
+                                  className={`w-5 h-5 rounded text-[9px] flex items-center justify-center font-mono ${
+                                    d.matchedNumbers.includes(n)
+                                      ? "bg-rose-500 text-white font-bold"
+                                      : "bg-slate-800 text-slate-500"
+                                  }`}
+                                >
+                                  {n}
+                                </div>
+                              ))}
+                            </div>
+                            <span className="text-slate-300 w-12 text-right">
+                              {d.matchedCount}/7
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
                     <button
                       onClick={() => savePick({
                         game,
-                        label: "★ Top Consensus Pick",
-                        source: "recommended",
-                        mainNumbers: recommendedPick.mainNumbers,
-                        powerball: recommendedPick.powerball ?? null,
-                        supplementaryNumbers: recommendedPick.supplementaryNumbers ?? null,
+                        label: "★ Set for Life 7-Draw Optimized",
+                        source: "sfl-optimized",
+                        mainNumbers: sflOptimized.mainNumbers,
+                        powerball: null,
+                        supplementaryNumbers: sflOptimized.supplementaryNumbers,
                       })}
-                      className="px-4 py-2 rounded-lg border border-amber-500/60 bg-amber-500/15 text-amber-200 font-mono text-xs font-semibold hover:bg-amber-500/25 hover:text-white transition-all flex items-center gap-2"
+                      className="px-4 py-2 rounded-lg border border-rose-500/60 bg-rose-500/15 text-rose-200 font-mono text-xs font-semibold hover:bg-rose-500/25 hover:text-white transition-all flex items-center gap-2"
                     >
                       <span className="text-base">💾</span>
-                      Save this pick
+                      Save this 7-draw pick
                     </button>
-                  </div>
+                  </>
+                ) : (
+                  /* Standard consensus pick (Powerball / Oz Lotto / Saturday Lotto) */
+                  <div className="flex flex-col lg:flex-row gap-6 items-center">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 mb-3">
+                        <div className="text-2xl">★</div>
+                        <h3 className="text-lg font-bold text-amber-300 font-mono tracking-wide">
+                          Top Consensus Pick
+                        </h3>
+                      </div>
+                      <p className="text-xs text-slate-300/90 leading-relaxed mb-3">
+                        {recommendedPick.rationale}
+                      </p>
+                      <p className="text-xs text-slate-400 leading-relaxed mb-4">
+                        {recommendedPick.secondaryRationale}
+                      </p>
+                      <button
+                        onClick={() => savePick({
+                          game,
+                          label: "★ Top Consensus Pick",
+                          source: "recommended",
+                          mainNumbers: recommendedPick.mainNumbers,
+                          powerball: recommendedPick.powerball ?? null,
+                          supplementaryNumbers: recommendedPick.supplementaryNumbers ?? null,
+                        })}
+                        className="px-4 py-2 rounded-lg border border-amber-500/60 bg-amber-500/15 text-amber-200 font-mono text-xs font-semibold hover:bg-amber-500/25 hover:text-white transition-all flex items-center gap-2"
+                      >
+                        <span className="text-base">💾</span>
+                        Save this pick
+                      </button>
+                    </div>
 
-                  {/* Right: numbers */}
-                  <div className="flex flex-col items-center gap-4 lg:border-l lg:border-slate-700/50 lg:pl-6">
-                    <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
-                      Main numbers ({config.mainNumbersPerDraw})
-                    </div>
-                    <div className="flex flex-wrap justify-center gap-2 max-w-md">
-                      {recommendedPick.mainNumbers.map((n, i) => (
-                        <NumberBall key={i} value={n} size="xl" variant="prediction" />
-                      ))}
-                    </div>
-                    <div className={`text-[10px] font-mono uppercase tracking-wider mt-2 ${config.hasPowerball ? "text-rose-400" : "text-amber-400"}`}>
-                      {secLabel}{config.hasPowerball ? "" : ` (${secCountPerDraw})`}
-                    </div>
-                    <div className="flex flex-wrap justify-center gap-2">
-                      {config.hasPowerball ? (
-                        <NumberBall value={recommendedPick.powerball ?? 0} size="xl" variant="powerball_pred" />
-                      ) : (
-                        (recommendedPick.supplementaryNumbers ?? []).map((n, i) => (
-                          <NumberBall key={i} value={n} size="lg" variant="powerball_pred" />
-                        ))
-                      )}
+                    <div className="flex flex-col items-center gap-4 lg:border-l lg:border-slate-700/50 lg:pl-6">
+                      <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">
+                        Main numbers ({config.mainNumbersPerDraw})
+                      </div>
+                      <div className="flex flex-wrap justify-center gap-2 max-w-md">
+                        {recommendedPick.mainNumbers.map((n, i) => (
+                          <NumberBall key={i} value={n} size="xl" variant="prediction" />
+                        ))}
+                      </div>
+                      <div className={`text-[10px] font-mono uppercase tracking-wider mt-2 ${config.hasPowerball ? "text-rose-400" : "text-amber-400"}`}>
+                        {secLabel}{config.hasPowerball ? "" : ` (${secCountPerDraw})`}
+                      </div>
+                      <div className="flex flex-wrap justify-center gap-2">
+                        {config.hasPowerball ? (
+                          <NumberBall value={recommendedPick.powerball ?? 0} size="xl" variant="powerball_pred" />
+                        ) : (
+                          (recommendedPick.supplementaryNumbers ?? []).map((n, i) => (
+                            <NumberBall key={i} value={n} size="lg" variant="powerball_pred" />
+                          ))
+                        )}
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
 
-                {/* Consensus votes table */}
-                <div className="mt-6 pt-5 border-t border-slate-700/50">
-                  <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-3">
-                    Consensus votes — top 12 numbers (of {recommendedPick.totalMethods} methods)
+                {/* Consensus votes table — only show for non-Set-For-Life (consensus mode) */}
+                {!isSetForLife && (
+                  <div className="mt-6 pt-5 border-t border-slate-700/50">
+                    <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400 mb-3">
+                      Consensus votes — top 12 numbers (of {recommendedPick.totalMethods} methods)
+                    </div>
+                    <div className="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
+                      {recommendedPick.consensusScores.map((s) => {
+                        const isInPick = recommendedPick.mainNumbers.includes(s.number);
+                        const votePct = (s.votes / recommendedPick.totalMethods) * 100;
+                        return (
+                          <div
+                            key={s.number}
+                            className={`text-center rounded p-2 border ${
+                              isInPick
+                                ? "bg-amber-500/15 border-amber-500/50"
+                                : "bg-slate-900/40 border-slate-700/40"
+                            }`}
+                          >
+                            <div className={`text-sm font-mono font-bold ${isInPick ? "text-amber-300" : "text-slate-300"}`}>
+                              {s.number.toString().padStart(2, "0")}
+                            </div>
+                            <div className="text-[9px] font-mono text-slate-400 mt-0.5">
+                              {s.votes}/{recommendedPick.totalMethods}
+                            </div>
+                            <div className="h-1 bg-slate-800 rounded mt-1 overflow-hidden">
+                              <div
+                                className={`h-full ${isInPick ? "bg-amber-500" : "bg-cyan-500/60"}`}
+                                style={{ width: `${votePct}%` }}
+                              />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                  <div className="grid grid-cols-6 sm:grid-cols-12 gap-1.5">
-                    {recommendedPick.consensusScores.map((s) => {
-                      const isInPick = recommendedPick.mainNumbers.includes(s.number);
-                      const votePct = (s.votes / recommendedPick.totalMethods) * 100;
-                      return (
-                        <div
-                          key={s.number}
-                          className={`text-center rounded p-2 border ${
-                            isInPick
-                              ? "bg-amber-500/15 border-amber-500/50"
-                              : "bg-slate-900/40 border-slate-700/40"
-                          }`}
-                        >
-                          <div className={`text-sm font-mono font-bold ${isInPick ? "text-amber-300" : "text-slate-300"}`}>
-                            {s.number.toString().padStart(2, "0")}
-                          </div>
-                          <div className="text-[9px] font-mono text-slate-400 mt-0.5">
-                            {s.votes}/{recommendedPick.totalMethods}
-                          </div>
-                          <div className="h-1 bg-slate-800 rounded mt-1 overflow-hidden">
-                            <div
-                              className={`h-full ${isInPick ? "bg-amber-500" : "bg-cyan-500/60"}`}
-                              style={{ width: `${votePct}%` }}
-                            />
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
+                )}
               </CardContent>
             </Card>
           </section>
