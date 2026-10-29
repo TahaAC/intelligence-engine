@@ -12,6 +12,7 @@ const accentMap: Record<string, string> = {
   balanced: "from-amber-500/20 to-yellow-500/10 border-amber-500/40",
   markov_informed: "from-fuchsia-500/20 to-purple-500/10 border-fuchsia-500/40",
   statistical_norm: "from-teal-500/20 to-cyan-500/10 border-teal-500/40",
+  smartplay_simulator: "from-slate-400/20 to-slate-600/10 border-slate-400/60 shadow-[0_0_20px_rgba(148,163,184,0.25)]",
 };
 
 const iconMap: Record<string, string> = {
@@ -20,6 +21,7 @@ const iconMap: Record<string, string> = {
   balanced: "⚖",
   markov_informed: "⇄",
   statistical_norm: "∑",
+  smartplay_simulator: "🎰",
 };
 
 interface StrategyCardProps {

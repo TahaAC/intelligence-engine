@@ -1057,14 +1057,15 @@ export function computeSecondaryChiSquare(game: GameId = "powerball"): ChiSquare
 }
 
 // -----------------------------------------------------------------------------
-// 10. FIVE-STRATEGY ENSEMBLE PREDICTOR
+// 10. SIX-STRATEGY ENSEMBLE PREDICTOR (was 5, added Smartplay Halogen II Simulator)
 // -----------------------------------------------------------------------------
 export type StrategyId =
   | "frequency_weighted"
   | "cold_due"
   | "balanced"
   | "markov_informed"
-  | "statistical_norm";
+  | "statistical_norm"
+  | "smartplay_simulator";
 
 export interface StrategyResult {
   id: StrategyId;
@@ -1188,6 +1189,14 @@ export function computePredictions(game: GameId = "powerball", seed?: number): S
   const pbMarkov = weightedPick(pbMarkovCands, secCount, resolveSeed(904, 555555));
   const pbStatistical = weightedPick(pbStatCands, secCount, resolveSeed(1005, 20261022));
 
+  // Strategy 6 — Smartplay Halogen II Simulator (uses crypto randomness, not seeded)
+  // This is computed fresh on each call — truly random like the real machine.
+  const smartplayPick = computeSmartplaySimulatorPick(game);
+  const smartplayMain = smartplayPick.mainNumbers;
+  const smartplaySecondary = config.hasPowerball
+    ? (smartplayPick.powerball != null ? [smartplayPick.powerball] : [])
+    : (smartplayPick.supplementaryNumbers ?? []);
+
   return [
     {
       id: "frequency_weighted",
@@ -1229,7 +1238,92 @@ export function computePredictions(game: GameId = "powerball", seed?: number): S
       mainNumbers: bestSet,
       ...(config.hasPowerball ? { powerball: pbStatistical[0] } : { supplementaryNumbers: pbStatistical }),
     },
+    {
+      id: "smartplay_simulator",
+      name: "Smartplay Halogen II",
+      tagline: "Machine-faithful RNG",
+      description: `Models the physical Smartplay Halogen II draw machine — uses Web Crypto API (crypto.getRandomValues) for hardware-grade randomness, the closest software equivalent to the machine's chaotic ball mixing. ${config.hasPowerball ? "Two-chamber process: main barrel (1-" + config.mainMax + ") then separate Powerball barrel (1-" + config.powerballMax + ")." : "Single-chamber process: " + config.mainNumbersPerDraw + " main from 1-" + config.mainMax + ", then " + config.supplementaryCount + " supplementary from remaining pool."} Each click produces truly random numbers (no seed) — like the real machine. Cannot predict the real machine's output.`,
+      mainNumbers: smartplayMain,
+      ...(config.hasPowerball ? { powerball: smartplaySecondary[0] } : { supplementaryNumbers: smartplaySecondary }),
+    },
   ];
+}
+
+// -----------------------------------------------------------------------------
+// 10b. SMARTPLAY HALOGEN II SIMULATOR — hardware-grade random draw
+// -----------------------------------------------------------------------------
+// Uses crypto.getRandomValues() for true hardware entropy (the closest software
+// equivalent to the Smartplay Halogen II's chaotic ball mixing process).
+// Models the physical draw process:
+//   - Powerball: two separate chambers (35 main balls + 20 PB balls)
+//   - Oz Lotto / Saturday Lotto: single chamber, supplementary drawn from remaining
+//   - Set for Life: RNG mode (SFL actually uses RNG in real life, not mechanical)
+//
+// IMPORTANT: This is a FAITHFUL SIMULATOR, not a predictor. It uses the same
+// randomness PRINCIPLES as the real machine but cannot predict the real
+// machine's output (chaotic systems are fundamentally unpredictable).
+
+function cryptoRandomInt(maxExclusive: number): number {
+  // Returns a uniformly random integer in [0, maxExclusive) using Web Crypto API.
+  // Falls back to Math.random if crypto is unavailable (SSR or old browser).
+  if (typeof globalThis !== "undefined" && globalThis.crypto && globalThis.crypto.getRandomValues) {
+    // Use rejection sampling to avoid modulo bias
+    const maxUint32 = 0xFFFFFFFF;
+    const limit = maxUint32 - (maxUint32 % maxExclusive);
+    const arr = new Uint32Array(1);
+    let r;
+    do {
+      globalThis.crypto.getRandomValues(arr);
+      r = arr[0];
+    } while (r >= limit);
+    return r % maxExclusive;
+  }
+  return Math.floor(Math.random() * maxExclusive);
+}
+
+function simulateChamberDraw(poolSize: number, drawCount: number): number[] {
+  // Simulate the physical draw process:
+  // 1. Load all balls into the chamber (1..poolSize)
+  // 2. Mix thoroughly (Fisher-Yates shuffle with crypto randomness)
+  // 3. Draw 'drawCount' balls from the top
+  // 4. Return sorted (matching how lottery results are displayed)
+  const balls = Array.from({ length: poolSize }, (_, i) => i + 1);
+  // Fisher-Yates shuffle using crypto randomness
+  for (let i = balls.length - 1; i > 0; i--) {
+    const j = cryptoRandomInt(i + 1);
+    [balls[i], balls[j]] = [balls[j], balls[i]];
+  }
+  return balls.slice(0, drawCount).sort((a, b) => a - b);
+}
+
+export function computeSmartplaySimulatorPick(game: GameId = "powerball"): {
+  mainNumbers: number[];
+  powerball?: number;
+  supplementaryNumbers?: number[];
+} {
+  const config = getGameConfig(game);
+
+  // Main numbers: drawn from main chamber
+  const mainNumbers = simulateChamberDraw(config.mainMax, config.mainNumbersPerDraw);
+
+  // Secondary numbers
+  if (config.hasPowerball) {
+    // Powerball: SEPARATE chamber (1-20) — modeled as independent draw
+    const powerball = simulateChamberDraw(config.powerballMax, 1)[0];
+    return { mainNumbers, powerball };
+  } else {
+    // Oz Lotto / Saturday Lotto / Set for Life: draw supplementary from REMAINING pool
+    // (after main numbers removed, just like the real machine)
+    const remaining = Array.from({ length: config.supplementaryMax }, (_, i) => i + 1)
+      .filter((n) => !mainNumbers.includes(n));
+    // Shuffle remaining pool
+    for (let i = remaining.length - 1; i > 0; i--) {
+      const j = cryptoRandomInt(i + 1);
+      [remaining[i], remaining[j]] = [remaining[j], remaining[i]];
+    }
+    const supplementaryNumbers = remaining.slice(0, config.supplementaryCount).sort((a, b) => a - b);
+    return { mainNumbers, supplementaryNumbers };
+  }
 }
 
 // -----------------------------------------------------------------------------
