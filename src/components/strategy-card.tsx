@@ -29,9 +29,10 @@ interface StrategyCardProps {
   game: GameId;
   onSave?: (pick: { label: string; source: string; mainNumbers: number[]; powerball?: number | null; supplementaryNumbers?: number[] | null }) => void;
   saved?: boolean;
+  mixing?: boolean;
 }
 
-export function StrategyCard({ strategy, game, onSave, saved }: StrategyCardProps) {
+export function StrategyCard({ strategy, game, onSave, saved, mixing }: StrategyCardProps) {
   const config = getGameConfig(game);
   const secLabel = config.hasPowerball ? "Powerball" : "Supplementary";
   const secNumbers = config.hasPowerball
@@ -42,9 +43,29 @@ export function StrategyCard({ strategy, game, onSave, saved }: StrategyCardProp
     <div
       className={cn(
         "relative rounded-xl border bg-gradient-to-br p-5 backdrop-blur-sm transition-all hover:scale-[1.02]",
-        accentMap[strategy.id] || "border-slate-700 bg-slate-900/50"
+        accentMap[strategy.id] || "border-slate-700 bg-slate-900/50",
+        mixing && "animate-pulse"
       )}
     >
+      {/* Mixing animation overlay — only shows on Smartplay card when mixing=true */}
+      {mixing && (
+        <div className="absolute inset-0 z-20 rounded-xl bg-slate-950/80 backdrop-blur-sm flex flex-col items-center justify-center gap-3">
+          <div className="text-3xl animate-bounce">🎰</div>
+          <div className="text-xs font-mono text-slate-300 uppercase tracking-widest">Mixing balls...</div>
+          <div className="flex gap-1.5">
+            {[0, 1, 2, 3, 4, 5, 6].map((i) => (
+              <div
+                key={i}
+                className="w-6 h-6 rounded-full bg-slate-600 border border-slate-400/40"
+                style={{
+                  animation: `smartplay-bounce 0.6s ease-in-out ${i * 0.08}s infinite alternate`,
+                }}
+              />
+            ))}
+          </div>
+          <div className="text-[9px] font-mono text-slate-500 mt-1">crypto.getRandomValues()</div>
+        </div>
+      )}
       <div className="flex items-start gap-3 mb-3">
         <div className="text-2xl leading-none font-mono">{iconMap[strategy.id]}</div>
         <div className="flex-1 min-w-0">
@@ -62,7 +83,7 @@ export function StrategyCard({ strategy, game, onSave, saved }: StrategyCardProp
               powerball: strategy.powerball ?? null,
               supplementaryNumbers: strategy.supplementaryNumbers ?? null,
             })}
-            disabled={saved}
+            disabled={saved || mixing}
             title={saved ? "Saved" : "Save this pick"}
             className={`shrink-0 w-8 h-8 rounded-md border font-mono text-sm transition-all flex items-center justify-center ${
               saved

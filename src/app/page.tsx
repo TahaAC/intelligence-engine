@@ -268,6 +268,18 @@ export default function Home() {
     setLastRegen("");
   };
 
+  // Manual Entry state — lets user add draws by hand when sync fails
+  const [manualEntryDrawNumber, setManualEntryDrawNumber] = useState<string>("");
+  const [manualEntryDate, setManualEntryDate] = useState<string>("");
+  const [manualEntryMainNumbers, setManualEntryMainNumbers] = useState<string>("");
+  const [manualEntrySecondary, setManualEntrySecondary] = useState<string>("");
+  const [manualEntryMsg, setManualEntryMsg] = useState<string>("");
+  const [manualEntryOk, setManualEntryOk] = useState<boolean | null>(null);
+  const [manualEntrySubmitting, setManualEntrySubmitting] = useState(false);
+
+  // Smartplay mixing animation state
+  const [smartplayMixing, setSmartplayMixing] = useState(false);
+
   const handleGameChange = (newGame: GameId) => {
     if (newGame === game) return;
     setGame(newGame);
@@ -276,7 +288,82 @@ export default function Home() {
     setLastRegen("");
     setSyncMsg("");
     setLastSync("");
+    // Reset manual entry form when switching games
+    setManualEntryDrawNumber("");
+    setManualEntryDate("");
+    setManualEntryMainNumbers("");
+    setManualEntrySecondary("");
+    setManualEntryMsg("");
+    setManualEntryOk(null);
   };
+
+  // Submit manual entry to /api/manual-entry
+  const handleManualEntrySubmit = useCallback(async () => {
+    setManualEntrySubmitting(true);
+    setManualEntryMsg("Submitting...");
+    setManualEntryOk(null);
+    try {
+      // Parse main numbers (split by spaces, commas, or newlines)
+      const mainNums = manualEntryMainNumbers
+        .split(/[\s,]+/)
+        .map((s) => parseInt(s.trim(), 10))
+        .filter((n) => Number.isFinite(n));
+
+      // Parse secondary numbers
+      const secNums = manualEntrySecondary
+        .split(/[\s,]+/)
+        .map((s) => parseInt(s.trim(), 10))
+        .filter((n) => Number.isFinite(n));
+
+      const payload: any = {
+        game,
+        drawNumber: parseInt(manualEntryDrawNumber, 10),
+        date: manualEntryDate,
+        mainNumbers: mainNums,
+      };
+      if (config.hasPowerball) {
+        payload.powerball = secNums[0];
+      } else {
+        payload.supplementaryNumbers = secNums;
+      }
+
+      const res = await fetch("/api/manual-entry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      if (data.ok) {
+        setManualEntryOk(true);
+        setManualEntryMsg(
+          `✓ Added ${config.label} Draw #${data.draw.drawNumber} (${data.draw.dateLabel}). Total in DB: ${data.totalInDb}`
+        );
+        // Clear form
+        setManualEntryDrawNumber("");
+        setManualEntryDate("");
+        setManualEntryMainNumbers("");
+        setManualEntrySecondary("");
+        // Refresh draws from DB
+        await refreshDraws(game, { quiet: true });
+      } else {
+        setManualEntryOk(false);
+        setManualEntryMsg(`✗ ${data.error || "Unknown error"}`);
+      }
+    } catch (e: any) {
+      setManualEntryOk(false);
+      setManualEntryMsg(`✗ ${e?.message || String(e)}`);
+    } finally {
+      setManualEntrySubmitting(false);
+    }
+  }, [game, config, manualEntryDrawNumber, manualEntryDate, manualEntryMainNumbers, manualEntrySecondary, refreshDraws]);
+
+  // Trigger Smartplay mixing animation when seed changes (new numbers generated)
+  useEffect(() => {
+    if (predictionSeed === 0) return; // skip initial load
+    setSmartplayMixing(true);
+    const t = setTimeout(() => setSmartplayMixing(false), 1200);
+    return () => clearTimeout(t);
+  }, [predictionSeed]);
 
   const secLabel = config.hasPowerball ? "Powerball" : "Supplementary";
   const secShort = config.hasPowerball ? "PB" : "SUPP";
@@ -394,6 +481,83 @@ export default function Home() {
             </div>
           </section>
 
+          {/* MANUAL ENTRY — fallback when auto-sync fails */}
+          <section className="rounded-xl border border-cyan-500/30 bg-gradient-to-br from-cyan-950/20 to-slate-950/40 p-4 backdrop-blur-sm">
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-7 h-7 rounded bg-cyan-500/20 border border-cyan-500/40 flex items-center justify-center text-cyan-300 font-mono text-sm">
+                ✎
+              </div>
+              <div>
+                <div className="text-sm font-semibold text-cyan-200 font-mono tracking-wide">
+                  MANUAL ENTRY · {config.label}
+                </div>
+                <div className="text-[10px] font-mono text-slate-400">
+                  Add a draw by hand when auto-sync fails (geo-block, Cloudflare, etc.)
+                </div>
+              </div>
+            </div>
+            <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
+              <div>
+                <label className="text-[10px] font-mono uppercase text-slate-400 block mb-1">Draw number</label>
+                <input
+                  type="number"
+                  value={manualEntryDrawNumber}
+                  onChange={(e) => setManualEntryDrawNumber(e.target.value)}
+                  placeholder="e.g. 1590"
+                  className="w-full px-2 py-1.5 bg-slate-900/60 border border-slate-700 rounded text-sm font-mono text-slate-100 focus:border-cyan-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-mono uppercase text-slate-400 block mb-1">Date (yyyy-mm-dd)</label>
+                <input
+                  type="text"
+                  value={manualEntryDate}
+                  onChange={(e) => setManualEntryDate(e.target.value)}
+                  placeholder="e.g. 2026-11-05"
+                  className="w-full px-2 py-1.5 bg-slate-900/60 border border-slate-700 rounded text-sm font-mono text-slate-100 focus:border-cyan-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-mono uppercase text-slate-400 block mb-1">
+                  Main numbers ({config.mainNumbersPerDraw}, space or comma separated)
+                </label>
+                <input
+                  type="text"
+                  value={manualEntryMainNumbers}
+                  onChange={(e) => setManualEntryMainNumbers(e.target.value)}
+                  placeholder={`e.g. 4 12 15 22 28 31 35`}
+                  className="w-full px-2 py-1.5 bg-slate-900/60 border border-slate-700 rounded text-sm font-mono text-slate-100 focus:border-cyan-500 focus:outline-none"
+                />
+              </div>
+              <div>
+                <label className="text-[10px] font-mono uppercase text-slate-400 block mb-1">
+                  {secLabel} ({config.hasPowerball ? `1 number, 1-${config.powerballMax}` : `${config.supplementaryCount} numbers, 1-${config.supplementaryMax}`})
+                </label>
+                <input
+                  type="text"
+                  value={manualEntrySecondary}
+                  onChange={(e) => setManualEntrySecondary(e.target.value)}
+                  placeholder={config.hasPowerball ? `e.g. 10` : `e.g. 5 18`}
+                  className="w-full px-2 py-1.5 bg-slate-900/60 border border-slate-700 rounded text-sm font-mono text-slate-100 focus:border-cyan-500 focus:outline-none"
+                />
+              </div>
+            </div>
+            <div className="flex items-center gap-3 flex-wrap">
+              <button
+                onClick={handleManualEntrySubmit}
+                disabled={manualEntrySubmitting}
+                className="px-4 py-2 rounded-lg border border-cyan-500/50 bg-cyan-500/15 text-cyan-200 font-mono text-xs font-semibold hover:bg-cyan-500/25 hover:text-white transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {manualEntrySubmitting ? "Submitting..." : "✓ Add draw manually"}
+              </button>
+              {manualEntryMsg && (
+                <span className={`text-[11px] font-mono ${manualEntryOk ? "text-emerald-400" : manualEntryOk === false ? "text-rose-400" : "text-slate-400"}`}>
+                  {manualEntryMsg}
+                </span>
+              )}
+            </div>
+          </section>
+
           {/* HERO */}
           <section className="relative">
             <div className="rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-900/80 to-slate-950/80 p-6 sm:p-10 backdrop-blur-md overflow-hidden">
@@ -504,6 +668,7 @@ export default function Home() {
                     game={game}
                     onSave={(pick) => savePick({ ...pick, game })}
                     saved={isSaved}
+                    mixing={smartplayMixing && p.id === "smartplay_simulator"}
                   />
                 );
               })}
